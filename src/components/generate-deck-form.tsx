@@ -73,10 +73,20 @@ export function GenerateDeckForm() {
         },
         body: JSON.stringify(payload),
       });
-      const data = await response.json();
+      const raw = await response.text();
+      let data: { error?: string; deck?: { id: string } };
+      try {
+        data = JSON.parse(raw) as { error?: string; deck?: { id: string } };
+      } catch {
+        throw new Error("Unexpected server response. Please try again.");
+      }
 
       if (!response.ok) {
         throw new Error(data.error || "Deck generation failed.");
+      }
+
+      if (!data.deck?.id) {
+        throw new Error("Deck generation failed.");
       }
 
       router.push(`/play/${data.deck.id}`);
@@ -92,7 +102,7 @@ export function GenerateDeckForm() {
   }
 
   return (
-    <form className="deck-form" onSubmit={handleSubmit}>
+    <form className="deck-form" onSubmit={handleSubmit} aria-busy={isSubmitting}>
       <div className="field">
         <label htmlFor="eventContext">Event context</label>
         <input

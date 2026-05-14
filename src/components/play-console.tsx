@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Copy,
@@ -33,11 +40,21 @@ export function PlayConsole({ deck }: PlayConsoleProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [isHostPanelOpen, setIsHostPanelOpen] = useState(true);
   const [origin, setOrigin] = useState("");
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const copyResetRef = useRef<number | null>(null);
   const currentSlide = index >= 0 ? deck.slides[index] : null;
   const slideLabel = currentSlide ? `${index + 1} / ${deck.slides.length}` : "Intro";
 
   useEffect(() => {
     setOrigin(window.location.origin);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetRef.current !== null) {
+        window.clearTimeout(copyResetRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -52,8 +69,32 @@ export function PlayConsole({ deck }: PlayConsoleProps) {
     return () => window.clearInterval(timer);
   }, [isRunning]);
 
+  const nextSlide = useCallback(() => {
+    setIndex((value) => Math.min(deck.slides.length - 1, value + 1));
+    setIsRunning(true);
+  }, [deck.slides.length]);
+
+  const previousSlide = useCallback(() => {
+    setIndex((value) => Math.max(-1, value - 1));
+  }, []);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
       if (event.key === "ArrowRight" || event.key === " ") {
         event.preventDefault();
         nextSlide();
@@ -67,7 +108,7 @@ export function PlayConsole({ deck }: PlayConsoleProps) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  });
+  }, [nextSlide, previousSlide]);
 
   const formattedTime = useMemo(() => {
     const minutes = Math.floor(secondsLeft / 60)
@@ -76,15 +117,6 @@ export function PlayConsole({ deck }: PlayConsoleProps) {
     const seconds = (secondsLeft % 60).toString().padStart(2, "0");
     return `${minutes}:${seconds}`;
   }, [secondsLeft]);
-
-  function nextSlide() {
-    setIndex((value) => Math.min(deck.slides.length - 1, value + 1));
-    setIsRunning(true);
-  }
-
-  function previousSlide() {
-    setIndex((value) => Math.max(-1, value - 1));
-  }
 
   function resetRound() {
     setIndex(-1);
@@ -97,7 +129,32 @@ export function PlayConsole({ deck }: PlayConsoleProps) {
       return;
     }
 
-    await navigator.clipboard?.writeText(`${origin}/play/${deck.id}`);
+    const url = `${origin}/play/${deck.id}`;
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard unavailable");
+      }
+
+      await navigator.clipboard.writeText(url);
+      if (copyResetRef.current !== null) {
+        window.clearTimeout(copyResetRef.current);
+      }
+      setCopyState("copied");
+      copyResetRef.current = window.setTimeout(() => {
+        setCopyState("idle");
+        copyResetRef.current = null;
+      }, 2000);
+    } catch {
+      if (copyResetRef.current !== null) {
+        window.clearTimeout(copyResetRef.current);
+      }
+      setCopyState("failed");
+      copyResetRef.current = window.setTimeout(() => {
+        setCopyState("idle");
+        copyResetRef.current = null;
+      }, 2500);
+    }
   }
 
   async function enterFullscreen() {
@@ -175,89 +232,109 @@ export function PlayConsole({ deck }: PlayConsoleProps) {
       </button>
 
       {isHostPanelOpen ? (
-      <aside className="host-panel" aria-label="Host controls">
-        <div>
-          <p className="eyebrow">Host console</p>
-          <h2>{deck.title}</h2>
-          <p className="play-meta">
-            {deck.slides.length} slides · {deck.tone} · {deck.source === "openai" ? "AI generated" : "demo generated"}
+        <aside className="host-panel" aria-label="Host controls">
+          <p className="sr-only" role="status" aria-live="polite">
+            {copyState === "copied"
+              ? "Share link copied to clipboard."
+              : copyState === "failed"
+                ? "Could not copy link. Select the field and copy manually."
+                : ""}
           </p>
-        </div>
+          <div>
+            <p className="eyebrow">Host console</p>
+            <h2>{deck.title}</h2>
+            <p className="play-meta">
+              {deck.slides.length} slides · {deck.tone} ·{" "}
+              {deck.source === "openai" ? "AI generated" : "demo generated"}
+            </p>
+          </div>
 
-        <div className="timer-card">
-          <span>{slideLabel}</span>
-          <strong>{formattedTime}</strong>
-        </div>
+          <div className="timer-card">
+            <span>{slideLabel}</span>
+            <strong>{formattedTime}</strong>
+          </div>
 
-        <div className="slide-controls">
-          <button
-            className="icon-button"
-            type="button"
-            onClick={previousSlide}
-            disabled={index < 0}
-            title="Previous slide"
-            aria-label="Previous slide"
-          >
-            <SkipBack size={18} aria-hidden="true" />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={() => setIsRunning((value) => !value)}
-            title={isRunning ? "Pause timer" : "Start timer"}
-            aria-label={isRunning ? "Pause timer" : "Start timer"}
-          >
-            {isRunning ? <Pause size={18} aria-hidden="true" /> : <Play size={18} aria-hidden="true" />}
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={nextSlide}
-            disabled={index === deck.slides.length - 1}
-            title="Next slide"
-            aria-label="Next slide"
-          >
-            <SkipForward size={18} aria-hidden="true" />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={resetRound}
-            title="Reset round"
-            aria-label="Reset round"
-          >
-            <RotateCcw size={18} aria-hidden="true" />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={enterFullscreen}
-            title="Fullscreen"
-            aria-label="Fullscreen"
-          >
-            <Maximize2 size={18} aria-hidden="true" />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={copyLink}
-            title="Copy share link"
-            aria-label="Copy share link"
-          >
-            <Copy size={18} aria-hidden="true" />
-          </button>
-        </div>
+          <div className="slide-controls">
+            <button
+              className="icon-button"
+              type="button"
+              onClick={previousSlide}
+              disabled={index < 0}
+              title="Previous slide"
+              aria-label="Previous slide"
+            >
+              <SkipBack size={18} aria-hidden="true" />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => setIsRunning((value) => !value)}
+              title={isRunning ? "Pause timer" : "Start timer"}
+              aria-label={isRunning ? "Pause timer" : "Start timer"}
+            >
+              {isRunning ? <Pause size={18} aria-hidden="true" /> : <Play size={18} aria-hidden="true" />}
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={nextSlide}
+              disabled={index === deck.slides.length - 1}
+              title="Next slide"
+              aria-label="Next slide"
+            >
+              <SkipForward size={18} aria-hidden="true" />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={resetRound}
+              title="Reset round"
+              aria-label="Reset round"
+            >
+              <RotateCcw size={18} aria-hidden="true" />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={enterFullscreen}
+              title="Fullscreen"
+              aria-label="Fullscreen"
+            >
+              <Maximize2 size={18} aria-hidden="true" />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={copyLink}
+              title="Copy share link"
+              aria-label="Copy share link"
+              disabled={!origin}
+            >
+              <Copy size={18} aria-hidden="true" />
+            </button>
+          </div>
 
-        <label className="copy-field">
-          <span>Share link</span>
-          <input readOnly value={origin ? `${origin}/play/${deck.id}` : `/play/${deck.id}`} />
-        </label>
+          <label className="copy-field">
+            <span>
+              Share link
+              {copyState === "copied" ? (
+                <span className="copy-hint copy-hint-success"> · Copied</span>
+              ) : null}
+              {copyState === "failed" ? (
+                <span className="copy-hint copy-hint-error">
+                  {" "}
+                  · Copy blocked — select the field and use copy (Ctrl+C or Cmd+C)
+                </span>
+              ) : null}
+            </span>
+            <input readOnly value={origin ? `${origin}/play/${deck.id}` : `/play/${deck.id}`} />
+          </label>
 
-        <p className="host-note">
-          Keep the presenter on the main screen. Host-only notes are stored with
-          the deck but intentionally hidden from the slideshow.
-        </p>
-      </aside>
+          <p className="host-note">
+            Keep the presenter on the main screen. Host-only notes are stored with the deck but
+            intentionally hidden from the slideshow.
+          </p>
+        </aside>
       ) : null}
     </div>
   );
