@@ -10,6 +10,7 @@ import {
   completeDeck,
   deckGenerationJsonSchema,
   visualTypes,
+  visualVariants,
 } from "@/lib/deck";
 
 type GeneratedDeckShape = Pick<KaraokeDeck, "title" | "slides">;
@@ -54,6 +55,60 @@ const fallbackVisualTypes: VisualType[] = [
   "canvas",
   "bento",
   "isometric",
+];
+
+const fillerWords = new Set([
+  "about",
+  "after",
+  "audience",
+  "committee",
+  "company",
+  "deck",
+  "event",
+  "friend",
+  "friends",
+  "general",
+  "local",
+  "night",
+  "party",
+  "people",
+  "presentation",
+  "strategy",
+  "team",
+  "the",
+  "this",
+  "with",
+  "work",
+]);
+
+const motionWords = [
+  "Signals",
+  "Tradeoffs",
+  "Tension",
+  "Momentum",
+  "Evidence",
+  "Rumors",
+  "Constraints",
+  "Escalation",
+  "Delight",
+  "Risk",
+  "Timing",
+  "Proof",
+];
+
+const visualNouns = [
+  "Loop",
+  "Map",
+  "Index",
+  "Stack",
+  "Model",
+  "Matrix",
+  "Forecast",
+  "Protocol",
+  "Grid",
+  "Circuit",
+  "Ledger",
+  "Blueprint",
 ];
 
 const visualAliases: Record<VisualType, string[]> = {
@@ -350,188 +405,276 @@ function extractOutputText(payload: unknown): string | null {
   return null;
 }
 
-export function createFallbackDeck(request: DeckRequest): GeneratedDeckShape {
-  const count = request.slideCount;
-  const title = `${titleCase(request.theme)}: A Totally Prepared Briefing`;
-  const rawJokes = request.insideJokes
-    .split(/[,.\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+export function createFallbackDeck(
+  request: DeckRequest,
+  seed = crypto.randomUUID(),
+): GeneratedDeckShape {
+  const random = seededRandom(seed);
+  const keywords = buildKeywordBank(request);
+  const visualOrder = shuffle([...fallbackVisualTypes], random);
+  const variantOrder = shuffle([...visualVariants], random);
+  const paletteOrder = shuffle([...fallbackPalettes], random);
+  const usedHeadings = new Set<string>();
+  const usedVisualLabels = new Set<string>();
+  const titleStyle = pick(["Briefing", "Field Report", "Operating Model", "Forecast"], random);
+  const title = `${titleCase(request.theme)}: A Totally Prepared ${titleStyle}`;
 
-  const slides = Array.from({ length: count }, (_, index) => {
-    const slideNumber = index + 1;
-    const palette = fallbackPalettes[index % fallbackPalettes.length];
-    const joke = rawJokes[index % Math.max(rawJokes.length, 1)];
-    const visualType = fallbackVisualTypes[index % fallbackVisualTypes.length];
+  const slides = Array.from({ length: request.slideCount }, (_, index) => {
+    const visualType = visualOrder[index % visualOrder.length];
+    const visualVariant = variantOrder[index % variantOrder.length];
+    const slideKeywords = rotate(keywords, index);
+    const visualLabel = uniqueText(
+      fallbackVisual(visualType, index, slideKeywords, random),
+      usedVisualLabels,
+      index,
+      64,
+    );
+    const visualData = fallbackVisualData(visualType, index, request, slideKeywords, visualLabel, random);
 
     return {
-      id: `fallback-${slideNumber}`,
+      id: `fallback-${index + 1}`,
       kind: slideKinds[index],
-      kicker: fallbackKicker(index, request),
-      heading: fallbackHeading(index, request, joke),
-      points: fallbackPoints(index, request, joke),
-      visualLabel: fallbackVisual(visualType, index),
+      kicker: fallbackKicker(index, visualType, slideKeywords, random),
+      heading: uniqueText(fallbackHeading(index, request, visualType, slideKeywords, random), usedHeadings, index, 92),
+      points: fallbackPoints(index, request, slideKeywords, random),
+      visualLabel,
       visualType,
-      visualData: fallbackVisualData(visualType, index, request, joke),
-      visualPrompt: `${fallbackVisual(visualType, index)} about ${request.theme} for ${request.audience}`,
-      speakerHidden: `Host note: invite the presenter to justify this slide as if it were completely intentional.`,
-      palette,
+      visualVariant,
+      visualData,
+      visualPrompt: `${visualLabel} about ${request.theme} using ${slideKeywords.slice(0, 3).join(", ")}`,
+      speakerHidden: `Host note: ask why ${slideKeywords[0]} became the obvious turning point.`,
+      palette: paletteOrder[index % paletteOrder.length],
     } satisfies KaraokeSlide;
   });
 
   return { title, slides };
 }
 
-function fallbackKicker(index: number, request: DeckRequest): string {
+function fallbackKicker(
+  index: number,
+  visualType: VisualType,
+  keywords: string[],
+  random: () => number,
+): string {
   const options = [
-    "Executive Summary",
-    "Key Finding",
-    "Methodology",
-    "Market Signal",
-    "Unexpected Risk",
-    "Final Recommendation",
+    `${keywords[0]} Signal`,
+    `${visualTypeLabel(visualType)} Evidence`,
+    `${keywords[1]} Forecast`,
+    `${pick(motionWords, random)} Review`,
+    `Finding ${index + 1}`,
+    `${keywords[2]} Model`,
   ];
 
-  return options[index % options.length] || titleCase(request.tone);
+  return clip(pick(options, random), 42);
 }
 
-function fallbackHeading(index: number, request: DeckRequest, joke?: string): string {
+function fallbackHeading(
+  index: number,
+  request: DeckRequest,
+  visualType: VisualType,
+  keywords: string[],
+  random: () => number,
+): string {
   const theme = titleCase(request.theme);
-  const headings = [
-    `${theme} was always a people problem`,
-    `The data points to more dramatic entrances`,
-    `Our roadmap begins with one confident rectangle`,
-    `This room is entering its alignment era`,
-    `A small process change unlocks heroic nonsense`,
-    `The recommendation is simple: commit to the bit`,
+  const format = visualTypeLabel(visualType).toLowerCase();
+  const options = [
+    `${theme} depends on ${keywords[0].toLowerCase()}, unfortunately`,
+    `${keywords[1]} became the surprise operating principle`,
+    `The ${format} confirms our ${keywords[2].toLowerCase()} problem`,
+    `${keywords[0]} and ${keywords[3]} are now in productive tension`,
+    `A bold new era of ${keywords[1].toLowerCase()} accountability begins`,
+    `${keywords[2]} was hiding inside the agenda the whole time`,
   ];
 
-  if (joke && index % 3 === 2) {
-    return `${titleCase(joke)} is now a strategic pillar`;
+  if (request.insideJokes && index % 3 === 1) {
+    return clip(`${titleCase(parseJokes(request)[0] || keywords[0])} has entered the ${format}`, 92);
   }
 
-  return headings[index % headings.length];
+  return clip(pick(options, random), 92);
 }
 
-function fallbackPoints(index: number, request: DeckRequest, joke?: string): string[] {
-  const sets = [
-    ["One metric improved for reasons we will invent", "Stakeholders described the shape as promising"],
-    ["Phase one: confidence", "Phase two: a chart", "Phase three: applause"],
-    ["No one remembers approving this", "Everyone agrees it looks official"],
-    [`Designed for ${request.eventContext.slice(0, 46)}`, "Calibrated for maximum projector readability"],
-    ["Low risk", "High commitment", "Moderate use of dramatic pauses"],
+function fallbackPoints(
+  index: number,
+  request: DeckRequest,
+  keywords: string[],
+  random: () => number,
+): string[] {
+  const eventWord = clip(request.eventContext, 42);
+  const options = [
+    [`${keywords[0]} is measurable if nobody asks follow-ups`, `${keywords[1]} unlocks the next suspicious metric`],
+    [`Designed for ${eventWord}`, `${keywords[2]} keeps the room aligned enough`],
+    [`Phase one: ${keywords[0].toLowerCase()}`, `Phase two: ${keywords[1].toLowerCase()}`, `Phase three: applause`],
+    [`The risk is ${keywords[2].toLowerCase()}`, `The upside is ${keywords[3].toLowerCase()}`],
+    [`Audience impact: ${request.audience}`, `${keywords[0]} remains the official explanation`],
   ];
 
-  if (joke && index % 4 === 1) {
-    return [`Includes ${joke}`, "Presented as if this was in the plan all along"];
-  }
-
-  return sets[index % sets.length];
+  return pick(options, random).map((point) => clip(point, 88));
 }
 
-function fallbackVisual(visualType: VisualType, index: number): string {
+function fallbackVisual(
+  visualType: VisualType,
+  index: number,
+  keywords: string[],
+  random: () => number,
+): string {
+  const noun = pick(visualNouns, random);
   const labels: Record<VisualType, string[]> = {
-    venn: ["Overlap diagram", "Consensus Venn"],
-    comparison_table: ["Feature matrix", "Pros and cons"],
-    before_after: ["Before vs after", "Current to future"],
-    quadrant: ["Consensus quadrant", "Priority map"],
-    flowchart: ["Decision flow", "SOP flow"],
-    funnel: ["Conversion funnel", "Pipeline diagram"],
-    cycle: ["Feedback loop", "Flywheel"],
-    timeline: ["Roadmap", "Milestone timeline"],
-    hierarchy: ["Role hierarchy", "Taxonomy tree"],
-    pyramid: ["Tier pyramid", "Capability stack"],
-    network: ["Ecosystem map", "Dependency map"],
-    dashboard: ["KPI dashboard", "Scorecard"],
-    radar: ["Spider diagram", "Capability radar"],
-    heat_matrix: ["Risk heatmap", "Correlation matrix"],
-    canvas: ["Strategy canvas", "Operating model"],
-    bento: ["Bento layout", "Modular grid"],
-    isometric: ["Isometric blocks", "Layer stack"],
+    venn: [`${keywords[0]} Overlap`, `${keywords[1]} Venn`],
+    comparison_table: [`${keywords[0]} Tradeoff Table`, `${keywords[1]} Decision Ledger`],
+    before_after: [`${keywords[0]} Before/After`, `${keywords[1]} Transformation Map`],
+    quadrant: [`${keywords[0]} Quadrant`, `${keywords[1]} Priority Field`],
+    flowchart: [`${keywords[0]} Decision Flow`, `${keywords[1]} Escalation Path`],
+    funnel: [`${keywords[0]} Funnel`, `${keywords[1]} Conversion Slide`],
+    cycle: [`${keywords[0]} Feedback Loop`, `${keywords[1]} Repeat Cycle`],
+    timeline: [`${keywords[0]} Timeline`, `${keywords[1]} Roadmap`],
+    hierarchy: [`${keywords[0]} Org Stack`, `${keywords[1]} Taxonomy`],
+    pyramid: [`${keywords[0]} Pyramid`, `${keywords[1]} Layer Cake`],
+    network: [`${keywords[0]} Network`, `${keywords[1]} Ecosystem`],
+    dashboard: [`${keywords[0]} Dashboard`, `${keywords[1]} Scorecard`],
+    radar: [`${keywords[0]} Radar`, `${keywords[1]} Capability Web`],
+    heat_matrix: [`${keywords[0]} Heat Map`, `${keywords[1]} Risk Matrix`],
+    canvas: [`${keywords[0]} Canvas`, `${keywords[1]} Operating Model`],
+    bento: [`${keywords[0]} Bento`, `${keywords[1]} Modular Grid`],
+    isometric: [`${keywords[0]} Isometric ${noun}`, `${keywords[1]} Stack Diagram`],
   };
 
-  const options = labels[visualType];
-  return options[index % options.length];
+  return labels[visualType][index % labels[visualType].length];
 }
 
 function fallbackVisualData(
   visualType: VisualType,
   index: number,
   request: DeckRequest,
-  joke?: string,
+  keywords: string[],
+  title: string,
+  random: () => number,
 ): VisualData {
-  const theme = titleCase(request.theme);
-  const labels = fallbackLabels(index, theme, joke);
-  const values = fallbackValues(index);
-
-  const shared = {
-    title: fallbackVisual(visualType, index),
-    labels,
-    values,
-    notes: [
-      request.tone === "academic" ? "Peer-reviewed vibes" : "Looks official",
-      joke ? clip(`Includes ${joke}`, 48) : "No one asked why",
-    ],
-  };
+  const values = fallbackValues(random, 8);
+  const notes = [
+    request.tone === "academic" ? `${keywords[0]} peer-reviewed vibes` : `${keywords[0]} looks official`,
+    `${keywords[1]} remains unexplained`,
+  ].map((note) => clip(note, 48));
 
   switch (visualType) {
     case "venn":
-      return { ...shared, labels: labels.slice(0, 3), values: [62, 58, 34] };
+      return { title, labels: labelsFor(keywords, ["Belief", "Process", "Snacks"], 3), values: values.slice(0, 3), notes };
     case "comparison_table":
-      return { ...shared, labels: ["Old plan", "New plan", "Confidence", "Snacks"], values: [42, 81, 73, 66] };
+      return { title, labels: labelsFor(keywords, ["Old plan", "New plan", "Proof", "Doubt"], 4), values: values.slice(0, 4), notes };
     case "before_after":
-      return { ...shared, labels: ["Before", "After", clip(theme, 42)], values: [32, 84] };
+      return { title, labels: ["Before", "After", clip(keywords[0], 42)], values: values.slice(0, 2), notes };
     case "quadrant":
-      return { ...shared, labels: ["Urgent", "Useful", "Loud", "Mysterious"], values: [68, 78, 36, 52] };
+      return { title, labels: labelsFor(keywords, ["Urgent", "Useful", "Loud", "Weird"], 4), values: values.slice(0, 4), notes };
     case "flowchart":
-      return { ...shared, labels: ["Idea", "Committee", "Chart", "Applause"], values: [] };
+      return { title, labels: labelsFor(keywords, ["Notice", "Debate", "Chart", "Applause"], 4), values: [], notes };
     case "funnel":
-      return { ...shared, labels: ["Awareness", "Debate", "Alignment", "Budget"], values: [100, 74, 48, 28] };
+      return { title, labels: labelsFor(keywords, ["Awareness", "Suspicion", "Alignment", "Budget"], 4), values: values.slice(0, 4).sort((a, b) => b - a), notes };
     case "cycle":
-      return { ...shared, labels: ["Notice", "Explain", "Rebrand", "Repeat"], values: [] };
+      return { title, labels: labelsFor(keywords, ["Spot", "Explain", "Rename", "Repeat"], 4), values: [], notes };
     case "timeline":
-      return { ...shared, labels: ["Now", "Soon", "Later", "Legend"], values: [20, 45, 70, 92] };
+      return { title, labels: labelsFor(keywords, ["Now", "Soon", "Later", "Legend"], 4), values: values.slice(0, 4).sort((a, b) => a - b), notes };
     case "hierarchy":
-      return { ...shared, labels: ["Executive Snack", "Task Force", "Pilot Team", "Committee"], values: [] };
+      return { title, labels: labelsFor(keywords, ["Sponsor", "Squad", "Pilot", "Committee"], 4), values: [], notes };
     case "pyramid":
-      return { ...shared, labels: ["Proof", "Process", "Belief", "Applause"], values: [25, 45, 70, 100] };
+      return { title, labels: labelsFor(keywords, ["Proof", "Process", "Belief", "Applause"], 4), values: values.slice(0, 4), notes };
     case "network":
-      return { ...shared, labels: ["Host", "Presenter", "Audience", "Mystery Metric", clip(theme, 42)], values: [] };
+      return { title, labels: labelsFor(keywords, ["Host", "Presenter", "Metric", "Room", "Outcome"], 5), values: [], notes };
     case "dashboard":
-      return { ...shared, labels: ["Confidence", "Momentum", "Alignment", "Drama"], values: [87, 64, 72, 91] };
+      return { title, labels: labelsFor(keywords, ["Confidence", "Momentum", "Drama", "Readiness"], 4), values: values.slice(0, 4), notes };
     case "radar":
-      return { ...shared, labels: ["Speed", "Logic", "Charm", "Risk", "Snacks"], values: [78, 43, 91, 56, 69] };
+      return { title, labels: labelsFor(keywords, ["Speed", "Logic", "Charm", "Risk", "Snack"], 5), values: values.slice(0, 5), notes };
     case "heat_matrix":
-      return { ...shared, labels: ["Low", "Medium", "High", "Heroic"], values: [18, 42, 75, 91, 55, 24, 68, 83] };
+      return { title, labels: labelsFor(keywords, ["Low", "Medium", "High", "Heroic"], 4), values: values.slice(0, 8), notes };
     case "canvas":
-      return { ...shared, labels: ["Audience", "Promise", "Metric", "Risk", "Next move", clip(theme, 42)], values: [] };
+      return { title, labels: labelsFor(keywords, ["Audience", "Promise", "Metric", "Risk", "Next move", "Proof"], 6), values: [], notes };
     case "bento":
-      return { ...shared, labels: ["Signal", "Story", "Proof", "Action", clip(theme, 42)], values: [74, 66, 48, 82, 57] };
+      return { title, labels: labelsFor(keywords, ["Signal", "Story", "Proof", "Action", "Wildcard"], 5), values: values.slice(0, 5), notes };
     case "isometric":
-      return { ...shared, labels: ["Foundation", "Layer two", "Platform", "Sparkle"], values: [26, 48, 72, 91] };
+      return { title, labels: labelsFor(keywords, ["Foundation", "Platform", "Spark", "Launch"], 4), values: values.slice(0, 4), notes };
   }
 }
 
-function fallbackLabels(index: number, theme: string, joke?: string): string[] {
-  const sets = [
-    [clip(theme, 42), "Confidence", "Budget", "Momentum"],
-    ["Research", "Consensus", "Pilot", "Scale"],
-    ["Useful", "Loud", "Possible", "Suspicious"],
-    ["Team", "Process", "Story", clip(joke || "Mystery", 42)],
-  ];
+function buildKeywordBank(request: DeckRequest): string[] {
+  const raw = [
+    request.theme,
+    request.themeDescription,
+    request.eventContext,
+    request.audience,
+    request.insideJokes,
+  ].join(" ");
+  const words = raw
+    .split(/[^a-zA-Z0-9]+/)
+    .map((word) => word.trim().toLowerCase())
+    .filter((word) => word.length > 2 && !fillerWords.has(word));
+  const unique = Array.from(new Set(words)).map(titleCase);
+  const fallback = ["Signal", "Momentum", "Evidence", "Budget", "Timing", "Applause", "Risk", "Outcome"];
 
-  return sets[index % sets.length];
+  return [...unique, ...fallback].slice(0, 12);
 }
 
-function fallbackValues(index: number): number[] {
-  const sets = [
-    [78, 56, 84, 39],
-    [42, 67, 91, 74],
-    [24, 48, 72, 96],
-    [88, 61, 47, 75],
-  ];
+function labelsFor(keywords: string[], fallbacks: string[], count: number): string[] {
+  return Array.from({ length: count }, (_, index) =>
+    clip(index < keywords.length ? keywords[index] : fallbacks[index % fallbacks.length], 42),
+  );
+}
 
-  return sets[index % sets.length];
+function fallbackValues(random: () => number, count: number): number[] {
+  return Array.from({ length: count }, () => 18 + Math.floor(random() * 78));
+}
+
+function visualTypeLabel(visualType: VisualType): string {
+  return visualType
+    .split("_")
+    .map(titleCase)
+    .join(" ");
+}
+
+function rotate<T>(items: T[], offset: number): T[] {
+  return items.map((_, index) => items[(index + offset) % items.length]);
+}
+
+function shuffle<T>(items: T[], random: () => number): T[] {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+  return copy;
+}
+
+function pick<T>(items: readonly T[], random: () => number): T {
+  return items[Math.floor(random() * items.length)];
+}
+
+function uniqueText(value: string, used: Set<string>, index: number, length: number): string {
+  let candidate = clip(value, length);
+  if (used.has(candidate)) {
+    candidate = clip(`${candidate} ${index + 1}`, length);
+  }
+  used.add(candidate);
+  return candidate;
+}
+
+function seededRandom(seed: string): () => number {
+  let state = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    state ^= seed.charCodeAt(index);
+    state = Math.imul(state, 16777619);
+  }
+
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function parseJokes(request: DeckRequest): string[] {
+  return request.insideJokes
+    .split(/[,.\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function clip(value: string, length: number): string {

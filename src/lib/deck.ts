@@ -29,9 +29,17 @@ export const visualTypes = [
   "isometric",
 ] as const;
 
+export const visualVariants = ["classic", "poster", "blueprint", "field-note"] as const;
+
 export const DeckRequestSchema = z.object({
   eventContext: z.string().trim().min(3).max(300),
-  audience: z.string().trim().min(2).max(200),
+  audience: z
+    .string()
+    .trim()
+    .max(200)
+    .optional()
+    .transform((value) => value || "general audience")
+    .pipe(z.string().min(2).max(200)),
   theme: z.string().trim().min(2).max(120),
   themeDescription: z.string().trim().max(300).optional().default(""),
   tone: z.enum(tones),
@@ -54,6 +62,7 @@ export const SlideSchema = z.object({
   points: z.array(z.string().min(2).max(88)).min(0).max(3),
   visualLabel: z.string().min(2).max(64),
   visualType: z.enum(visualTypes).optional(),
+  visualVariant: z.enum(visualVariants).optional(),
   visualData: VisualDataSchema.optional(),
   visualPrompt: z.string().min(8).max(240),
   speakerHidden: z.string().min(8).max(220),
@@ -79,6 +88,7 @@ export const DeckSchema = z.object({
 
 export type DeckRequest = z.infer<typeof DeckRequestSchema>;
 export type VisualType = (typeof visualTypes)[number];
+export type VisualVariant = (typeof visualVariants)[number];
 export type VisualData = z.infer<typeof VisualDataSchema>;
 export type KaraokeSlide = z.infer<typeof SlideSchema>;
 export type KaraokeDeck = z.infer<typeof DeckSchema>;
@@ -123,6 +133,10 @@ export const deckGenerationJsonSchema = {
           visualType: {
             type: "string",
             enum: visualTypes,
+          },
+          visualVariant: {
+            type: "string",
+            enum: visualVariants,
           },
           visualData: {
             type: "object",

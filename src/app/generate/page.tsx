@@ -8,8 +8,8 @@ export default function GeneratePage() {
           <p className="eyebrow">Deck generator</p>
           <h1>Create a surprise deck</h1>
           <p>
-            Give the host console just enough context to make slides that feel
-            specific, readable, and safe for the room.
+            Start with an event and theme. Audience and inside jokes are optional
+            flavor when you want the slides to feel more specific.
           </p>
           <GenerateDeckForm />
         </section>

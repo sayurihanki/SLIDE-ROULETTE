@@ -466,6 +466,11 @@ textarea {
   font-size: 0.9rem;
 }
 
+.theme-status {
+  color: var(--teal-dark);
+  font-weight: 750;
+}
+
 .form-error {
   color: #a83221;
 }
@@ -831,6 +836,121 @@ textarea {
   font-weight: 900;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.visual-poster {
+  border-width: 3px;
+  background: var(--visual-accent);
+  color: #ffffff;
+  box-shadow: 12px 12px 0 rgba(24, 32, 34, 0.18);
+}
+
+.visual-poster figcaption {
+  color: #ffffff;
+  font-size: clamp(1rem, 1.4vw, 1.35rem);
+}
+
+.visual-blueprint {
+  background:
+    linear-gradient(rgba(15, 123, 120, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 123, 120, 0.12) 1px, transparent 1px),
+    rgba(232, 247, 245, 0.82);
+  background-size: 18px 18px;
+  border-color: rgba(15, 123, 120, 0.36);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.68);
+}
+
+.visual-blueprint figcaption {
+  color: var(--teal-dark);
+}
+
+.visual-field-note {
+  transform: rotate(-0.8deg);
+  border: 2px dashed rgba(24, 32, 34, 0.28);
+  background: #fffdf8;
+  box-shadow: 8px 12px 0 rgba(239, 107, 79, 0.16);
+}
+
+.visual-field-note figcaption {
+  color: var(--coral);
+  text-transform: none;
+}
+
+.visual-poster .visual-svg text,
+.visual-poster .visual-table span,
+.visual-poster .dashboard-visual span {
+  fill: #ffffff;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.visual-poster .visual-table div,
+.visual-poster .dashboard-visual div,
+.visual-poster .canvas-visual span,
+.visual-poster .bento-visual span,
+.visual-poster .before-after div {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.visual-poster .visual-table .table-head,
+.visual-poster .before-after div:last-child,
+.visual-poster .quadrant-dot,
+.visual-poster .cycle-node,
+.visual-poster .flow-visual span,
+.visual-poster .timeline-visual span,
+.visual-poster .hierarchy-visual strong,
+.visual-poster .hierarchy-visual span,
+.visual-poster .funnel-visual span,
+.visual-poster .pyramid-visual span,
+.visual-poster .heat-visual span,
+.visual-poster .iso-block {
+  color: var(--ink);
+  background: #ffffff;
+}
+
+.visual-blueprint .visual-table div,
+.visual-blueprint .dashboard-visual div,
+.visual-blueprint .canvas-visual span,
+.visual-blueprint .bento-visual span,
+.visual-blueprint .before-after div,
+.visual-blueprint .quadrant-visual,
+.visual-blueprint .heat-visual span {
+  border: 1px solid rgba(15, 123, 120, 0.38);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.visual-blueprint .quadrant-dot,
+.visual-blueprint .cycle-node,
+.visual-blueprint .flow-visual span,
+.visual-blueprint .timeline-visual span,
+.visual-blueprint .hierarchy-visual strong,
+.visual-blueprint .hierarchy-visual span,
+.visual-blueprint .funnel-visual span,
+.visual-blueprint .pyramid-visual span,
+.visual-blueprint .iso-block {
+  border: 2px solid var(--visual-accent);
+  color: var(--teal-dark);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.visual-field-note .visual-table div,
+.visual-field-note .dashboard-visual div,
+.visual-field-note .canvas-visual span,
+.visual-field-note .bento-visual span,
+.visual-field-note .before-after div,
+.visual-field-note .quadrant-dot,
+.visual-field-note .cycle-node,
+.visual-field-note .flow-visual span,
+.visual-field-note .timeline-visual span,
+.visual-field-note .hierarchy-visual strong,
+.visual-field-note .hierarchy-visual span,
+.visual-field-note .funnel-visual span,
+.visual-field-note .pyramid-visual span,
+.visual-field-note .heat-visual span,
+.visual-field-note .iso-block {
+  color: var(--ink);
+  background: #fff4dc;
+  box-shadow: 4px 5px 0 rgba(24, 32, 34, 0.1);
 }
 
 .visual-svg {

@@ -11,6 +11,7 @@ export function SlideVisual({ slide }: SlideVisualProps) {
   if (!slide.visualType || !slide.visualData) {
     return <span className="visual-label">{slide.visualLabel}</span>;
   }
+  const visualVariant = slide.visualVariant || "classic";
 
   const style = {
     "--visual-accent": slide.palette.strong,
@@ -19,7 +20,11 @@ export function SlideVisual({ slide }: SlideVisualProps) {
   } as CSSProperties;
 
   return (
-    <figure className="slide-visual" style={style} aria-label={slide.visualLabel}>
+    <figure
+      className={`slide-visual visual-${visualVariant}`}
+      style={style}
+      aria-label={slide.visualLabel}
+    >
       <figcaption>{slide.visualData.title}</figcaption>
       {renderVisual(slide.visualType, slide.visualData)}
     </figure>

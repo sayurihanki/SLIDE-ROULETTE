@@ -30,6 +30,7 @@ export function GenerateDeckForm() {
   const [audienceFilter, setAudienceFilter] = useState<AudienceHint | "all">("all");
   const [themeValue, setThemeValue] = useState("");
   const [themeDescription, setThemeDescription] = useState("");
+  const [themeStatus, setThemeStatus] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
@@ -51,11 +52,14 @@ export function GenerateDeckForm() {
   function selectTheme(option: ThemeOption) {
     setThemeValue(option.theme);
     setThemeDescription(option.desc);
+    setThemeStatus(`${option.theme} selected`);
   }
 
   function randomizeTheme() {
     const pool = filteredThemes.length > 0 ? filteredThemes : themeOptions;
-    selectTheme(pool[Math.floor(Math.random() * pool.length)]);
+    const option = pool[Math.floor(Math.random() * pool.length)];
+    selectTheme(option);
+    setThemeStatus(`Random pick: ${option.theme}`);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -121,15 +125,15 @@ export function GenerateDeckForm() {
       </div>
 
       <div className="field">
-        <label htmlFor="audience">Audience</label>
+        <label htmlFor="audience">Audience (optional)</label>
         <input
           id="audience"
           name="audience"
-          required
           minLength={2}
           maxLength={200}
           placeholder="Product, design, ops, and sales teammates"
         />
+        <span className="field-help">Leave blank for a general-audience deck.</span>
       </div>
 
       <div className="field">
@@ -144,17 +148,19 @@ export function GenerateDeckForm() {
           onChange={(event) => {
             setThemeValue(event.target.value);
             setThemeDescription("");
+            setThemeStatus("");
           }}
           placeholder="The future of workplace snacks"
         />
         {themeDescription ? <span className="field-help">{themeDescription}</span> : null}
+        {themeStatus ? <span className="field-help theme-status">{themeStatus}</span> : null}
       </div>
 
       <section className="theme-picker" aria-label="Theme picker">
         <div className="theme-picker-header">
           <div>
             <h2>Browse prompts</h2>
-            <p>Pick a tested theme, filter by room, or type your own above.</p>
+            <p>Pick a tested theme, filter the list, or type your own above.</p>
           </div>
           <button className="button secondary" type="button" onClick={randomizeTheme}>
             <Shuffle size={17} aria-hidden="true" />
@@ -247,13 +253,14 @@ export function GenerateDeckForm() {
       </div>
 
       <div className="field">
-        <label htmlFor="insideJokes">Optional inside-joke ingredients</label>
+        <label htmlFor="insideJokes">Inside jokes (optional)</label>
         <textarea
           id="insideJokes"
           name="insideJokes"
           maxLength={300}
           placeholder="The printer incident, too many status colors, mysterious banana budget"
         />
+        <span className="field-help">Add a few light references, or skip this entirely.</span>
       </div>
 
       {error ? <p className="form-error">{error}</p> : null}
@@ -261,7 +268,7 @@ export function GenerateDeckForm() {
 
       <button className="button accent" type="submit" disabled={isSubmitting}>
         <WandSparkles size={18} aria-hidden="true" />
-        {isSubmitting ? "Generating..." : "Generate browser deck"}
+        {isSubmitting ? "Building your surprise deck..." : "Generate surprise deck"}
       </button>
     </form>
   );
