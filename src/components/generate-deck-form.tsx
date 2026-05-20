@@ -32,6 +32,15 @@ export function GenerateDeckForm() {
   const [themeDescription, setThemeDescription] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [progressStep, setProgressStep] = useState(0);
+
+  const progressMessages = [
+    "Sketching the fake executive summary...",
+    "Commissioning suspicious charts...",
+    "Writing host cues the presenter must not see...",
+    "Polishing jargon for maximum confidence...",
+    "Almost ready for the room...",
+  ];
   const filteredThemes = themeOptions.filter((option) => {
     const matchesCategory = category === "All" || option.category === category;
     const matchesAudience =
@@ -53,6 +62,11 @@ export function GenerateDeckForm() {
     event.preventDefault();
     setError("");
     setIsSubmitting(true);
+    setProgressStep(0);
+
+    const progressTimer = window.setInterval(() => {
+      setProgressStep((value) => Math.min(progressMessages.length - 1, value + 1));
+    }, 2200);
 
     const formData = new FormData(event.currentTarget);
     const payload = {
@@ -79,7 +93,7 @@ export function GenerateDeckForm() {
         throw new Error(data.error || "Deck generation failed.");
       }
 
-      router.push(`/play/${data.deck.id}`);
+      router.push(`/review/${data.deck.id}`);
     } catch (submissionError) {
       setError(
         submissionError instanceof Error
@@ -87,6 +101,7 @@ export function GenerateDeckForm() {
           : "Deck generation failed.",
       );
     } finally {
+      window.clearInterval(progressTimer);
       setIsSubmitting(false);
     }
   }
@@ -242,6 +257,7 @@ export function GenerateDeckForm() {
       </div>
 
       {error ? <p className="form-error">{error}</p> : null}
+      {isSubmitting ? <p className="generation-progress">{progressMessages[progressStep]}</p> : null}
 
       <button className="button accent" type="submit" disabled={isSubmitting}>
         <WandSparkles size={18} aria-hidden="true" />

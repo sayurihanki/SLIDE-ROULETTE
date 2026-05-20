@@ -15,7 +15,7 @@ const navItems = [
 export function AppChrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
-  if (pathname?.startsWith("/play")) {
+  if (pathname?.startsWith("/play") || pathname?.startsWith("/review")) {
     return children;
   }
 

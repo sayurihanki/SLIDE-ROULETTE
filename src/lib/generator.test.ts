@@ -21,6 +21,8 @@ describe("deck generation helpers", () => {
     expect(buildDeckPrompt({ ...request, themeDescription: "A product design retrospective" })).toContain(
       "A product design retrospective",
     );
+    expect(prompt).toContain("fake briefing arc");
+    expect(prompt).toContain("Do not repeat the same visualType");
     expect(prompt).toContain("visualType");
     expect(prompt).toContain("venn");
     expect(prompt).toContain("flowchart");
@@ -39,6 +41,7 @@ describe("deck generation helpers", () => {
       theme: request.theme,
       source: "fallback",
       createdAt: new Date().toISOString(),
+      generation: request,
     });
 
     expect(deck.slides).toHaveLength(8);

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { PlayConsole } from "@/components/play-console";
 import { getDeck } from "@/lib/store";
@@ -23,7 +24,9 @@ export default async function PlayPage({ params }: PlayPageProps) {
         <Link href="/">Slide Roulette</Link>
         <span className="play-meta">Presenter screen + host controls</span>
       </header>
-      <PlayConsole deck={deck} />
+      <Suspense fallback={<p className="play-meta">Loading host console...</p>}>
+        <PlayConsole deck={deck} />
+      </Suspense>
     </div>
   );
 }

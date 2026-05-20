@@ -1,5 +1,6 @@
 import {
   DeckRequest,
+  DeckRequestSchema,
   DeckSchema,
   KaraokeDeck,
   KaraokeSlide,
@@ -75,21 +76,70 @@ const visualAliases: Record<VisualType, string[]> = {
   isometric: ["isometric blocks", "architecture layers", "stack diagram"],
 };
 
-export function buildDeckPrompt(request: DeckRequest): string {
+export type DeckPromptOptions = {
+  tweak?: "safer" | "sillier" | "shorter";
+  replaceSlideIndex?: number;
+  deckTitle?: string;
+  neighborHeadings?: string[];
+  singleSlide?: boolean;
+};
+
+export function applyDeckTweak(
+  request: DeckRequest,
+  tweak: "safer" | "sillier" | "shorter",
+): DeckRequest {
+  if (tweak === "shorter") {
+    return {
+      ...request,
+      slideCount: Math.max(6, request.slideCount - 1),
+    };
+  }
+
+  if (tweak === "sillier") {
+    return {
+      ...request,
+      tone: request.tone === "academic" ? "silly" : request.tone === "polished" ? "chaotic" : request.tone,
+    };
+  }
+
+  return request;
+}
+
+export function buildDeckPrompt(request: DeckRequest, options?: DeckPromptOptions): string {
   const jokes = request.insideJokes
     ? `Optional inside-joke ingredients to use lightly: ${request.insideJokes}.`
     : "No inside jokes were provided.";
+  const slideCount = options?.singleSlide ? 1 : request.slideCount;
+  const tweakLine =
+    options?.tweak === "safer"
+      ? "Extra constraint: keep every joke broad, inclusive, and workplace-safe. No edgy punchlines."
+      : options?.tweak === "sillier"
+        ? "Extra constraint: lean into absurd business jargon, fake confidence, and playful nonsense."
+        : options?.tweak === "shorter"
+          ? "Extra constraint: make bullets even shorter and punchier for a faster round."
+          : null;
+  const replaceLine =
+    typeof options?.replaceSlideIndex === "number"
+      ? `Generate exactly 1 replacement slide for position ${options.replaceSlideIndex + 1} in deck "${options.deckTitle || request.theme}". Neighbor headings: ${(options.neighborHeadings || []).join(" | ") || "none"}.`
+      : null;
 
   return [
-    "Create an original PowerPoint Karaoke deck for an in-person host.",
+    options?.singleSlide
+      ? "Create exactly one replacement slide for an existing PowerPoint Karaoke deck."
+      : "Create an original PowerPoint Karaoke deck for an in-person host.",
     `Event context: ${request.eventContext}.`,
     `Audience: ${request.audience}.`,
     `Theme: ${request.theme}.`,
     request.themeDescription ? `Theme angle: ${request.themeDescription}.` : "No curated theme angle was provided.",
     `Tone: ${request.tone}.`,
-    `Slide count: exactly ${request.slideCount}.`,
+    `Slide count: exactly ${slideCount}.`,
     jokes,
+    replaceLine,
+    tweakLine,
     "The presenter has not seen the slides and must improvise.",
+    "Shape the deck as a fake briefing arc: opening thesis, escalating odd evidence, one crisis slide, a suspicious chart, then a bold recommendation.",
+    "Do not repeat the same visualType on consecutive slides.",
+    "Vary slide kind across title, chart, quote, diagram, and wildcard.",
     "Make every slide readable on a projector: one big idea, short headings, at most three concise bullets.",
     "Keep it work-safe, inclusive, and broadly understandable.",
     "Avoid real private people, protected brand claims, politics, explicit material, slurs, medical/legal/financial advice, and dense charts.",
@@ -97,13 +147,18 @@ export function buildDeckPrompt(request: DeckRequest): string {
     `Choose varied visualType values across the deck from: ${visualTypes.join(", ")}.`,
     `Map familiar diagram names onto those types, such as: ${Object.values(visualAliases).flat().join(", ")}.`,
     "For visualData, write a short title, 2-8 concise labels, 0-8 numeric values from 0 to 100 when useful, and 0-4 short notes.",
-    "speakerHidden is for the host only and must not be required to understand the slide.",
+    "speakerHidden is for the host only and must not be required to understand the slide. Give actionable host cues like callbacks, pacing, or audience prompts.",
     "Return only JSON that matches the provided schema.",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-export async function generateDeck(request: DeckRequest): Promise<KaraokeDeck> {
-  const openAiDeck = await tryOpenAiDeck(request);
+export async function generateDeck(
+  request: DeckRequest,
+  options?: DeckPromptOptions,
+): Promise<KaraokeDeck> {
+  const openAiDeck = await tryOpenAiDeck(request, options);
 
   if (openAiDeck) {
     return completeDeck(openAiDeck, request, "openai");
@@ -112,7 +167,83 @@ export async function generateDeck(request: DeckRequest): Promise<KaraokeDeck> {
   return completeDeck(createFallbackDeck(request), request, "fallback");
 }
 
-async function tryOpenAiDeck(request: DeckRequest): Promise<GeneratedDeckShape | null> {
+export async function regenerateDeck(
+  deck: KaraokeDeck,
+  tweak?: "safer" | "sillier" | "shorter",
+): Promise<KaraokeDeck> {
+  const baseRequest =
+    deck.generation ||
+    DeckRequestSchema.parse({
+      eventContext: "Live event remix",
+      audience: deck.audience,
+      theme: deck.theme,
+      themeDescription: "",
+      tone: deck.tone,
+      slideCount: deck.slides.length,
+      insideJokes: "",
+    });
+
+  const request = tweak ? applyDeckTweak(baseRequest, tweak) : baseRequest;
+  const generated = await generateDeck(request, { tweak });
+  return DeckSchema.parse({
+    ...generated,
+    id: deck.id,
+    createdAt: deck.createdAt,
+    generation: request,
+  });
+}
+
+export async function swapDeckSlide(deck: KaraokeDeck, slideIndex: number): Promise<KaraokeDeck> {
+  const request = deck.generation;
+  if (!request) {
+    return deck;
+  }
+
+  const neighborHeadings = [
+    deck.slides[slideIndex - 1]?.heading,
+    deck.slides[slideIndex + 1]?.heading,
+  ].filter(Boolean) as string[];
+
+  const replacement = await generateReplacementSlide(request, {
+    replaceSlideIndex: slideIndex,
+    deckTitle: deck.title,
+    neighborHeadings,
+  });
+
+  const slides = deck.slides.map((slide, index) =>
+    index === slideIndex ? { ...replacement, id: slide.id } : slide,
+  );
+
+  return DeckSchema.parse({
+    ...deck,
+    slides,
+  });
+}
+
+export async function generateReplacementSlide(
+  request: DeckRequest,
+  options: Pick<DeckPromptOptions, "replaceSlideIndex" | "deckTitle" | "neighborHeadings">,
+): Promise<KaraokeSlide> {
+  const openAiDeck = await tryOpenAiDeck(request, {
+    ...options,
+    singleSlide: true,
+  });
+
+  if (openAiDeck?.slides[0]) {
+    return SlideSchema.parse({ ...openAiDeck.slides[0], id: `generated-${options.replaceSlideIndex ?? 0}` });
+  }
+
+  const fallback = createFallbackDeck({ ...request, slideCount: 1 });
+  return SlideSchema.parse({
+    ...fallback.slides[0],
+    id: `fallback-${(options.replaceSlideIndex ?? 0) + 1}`,
+  });
+}
+
+async function tryOpenAiDeck(
+  request: DeckRequest,
+  options?: DeckPromptOptions,
+): Promise<GeneratedDeckShape | null> {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -136,7 +267,7 @@ async function tryOpenAiDeck(request: DeckRequest): Promise<GeneratedDeckShape |
           },
           {
             role: "user",
-            content: buildDeckPrompt(request),
+            content: buildDeckPrompt(request, options),
           },
         ],
         text: {

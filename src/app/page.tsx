@@ -9,8 +9,8 @@ const featureCards = [
   },
   {
     icon: MonitorPlay,
-    title: "Run from one screen",
-    body: "Open the host console, hand the presenter the clicker, and keep the room moving from a projector.",
+    title: "Run on two synced screens",
+    body: "Keep host cues on your laptop and mirror a clean presenter view to the projector.",
   },
   {
     icon: Clock3,
@@ -61,8 +61,8 @@ export default function Home() {
             <span>advance peeking</span>
           </p>
           <p>
-            <strong>1</strong>
-            <span>shared screen</span>
+            <strong>2</strong>
+            <span>synced screens</span>
           </p>
         </div>
       </section>

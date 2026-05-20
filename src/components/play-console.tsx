@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Copy,
+  ExternalLink,
+  Maximize2,
   PanelRightClose,
   PanelRightOpen,
-  Maximize2,
   Pause,
   Play,
   RotateCcw,
@@ -14,34 +15,49 @@ import {
   SkipForward,
 } from "lucide-react";
 import { KaraokeDeck } from "@/lib/deck";
-import { SlideVisual } from "@/components/slide-visual";
+import { SlideStage } from "@/components/slide-stage";
+import { useSlideSync } from "@/hooks/use-slide-sync";
 
 type PlayConsoleProps = {
   deck: KaraokeDeck;
+  mode?: "host" | "presenter";
 };
 
 const secondsPerRound = 240;
+const autoAdvanceSeconds = 28;
 
-export function PlayConsole({ deck }: PlayConsoleProps) {
+export function PlayConsole({ deck, mode = "host" }: PlayConsoleProps) {
   const searchParams = useSearchParams();
   const requestedSlide = Number(searchParams.get("slide") || 0);
   const initialIndex = Number.isFinite(requestedSlide)
     ? Math.min(deck.slides.length - 1, Math.max(-1, requestedSlide - 1))
     : -1;
-  const [index, setIndex] = useState(initialIndex);
+  const isPresenter = mode === "presenter";
+
+  const { index, setIndex } = useSlideSync({
+    deckId: deck.id,
+    role: isPresenter ? "presenter" : "host",
+    initialIndex,
+  });
+
   const [secondsLeft, setSecondsLeft] = useState(secondsPerRound);
   const [isRunning, setIsRunning] = useState(false);
-  const [isHostPanelOpen, setIsHostPanelOpen] = useState(true);
+  const [isHostPanelOpen, setIsHostPanelOpen] = useState(!isPresenter);
+  const [isHostCueOpen, setIsHostCueOpen] = useState(true);
   const [origin, setOrigin] = useState("");
+  const [autoAdvance, setAutoAdvance] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+
   const currentSlide = index >= 0 ? deck.slides[index] : null;
   const slideLabel = currentSlide ? `${index + 1} / ${deck.slides.length}` : "Intro";
+  const presenterUrl = origin ? `${origin}/play/${deck.id}/present` : `/play/${deck.id}/present`;
 
   useEffect(() => {
     setOrigin(window.location.origin);
   }, []);
 
   useEffect(() => {
-    if (!isRunning) {
+    if (isPresenter || !isRunning) {
       return;
     }
 
@@ -50,24 +66,61 @@ export function PlayConsole({ deck }: PlayConsoleProps) {
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [isRunning]);
+  }, [isPresenter, isRunning]);
 
   useEffect(() => {
+    if (!autoAdvance || !isRunning || isPresenter || index < 0 || index >= deck.slides.length - 1) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setIndex((current) => Math.min(deck.slides.length - 1, current + 1));
+    }, autoAdvanceSeconds * 1000);
+
+    return () => window.clearInterval(timer);
+  }, [autoAdvance, deck.slides.length, index, isPresenter, isRunning, setIndex]);
+
+  useEffect(() => {
+    if (isPresenter || secondsLeft !== 0 || !isRunning) {
+      return;
+    }
+
+    try {
+      const context = new AudioContext();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.frequency.value = 440;
+      gain.gain.value = 0.08;
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.18);
+    } catch {
+      // optional buzzer
+    }
+  }, [isPresenter, isRunning, secondsLeft]);
+
+  useEffect(() => {
+    if (isPresenter) {
+      return;
+    }
+
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "ArrowRight" || event.key === " ") {
         event.preventDefault();
-        nextSlide();
+        setIndex(Math.min(deck.slides.length - 1, index + 1));
+        setIsRunning(true);
       }
 
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        previousSlide();
+        setIndex(Math.max(-1, index - 1));
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  });
+  }, [deck.slides.length, index, isPresenter, setIndex]);
 
   const formattedTime = useMemo(() => {
     const minutes = Math.floor(secondsLeft / 60)
@@ -77,27 +130,18 @@ export function PlayConsole({ deck }: PlayConsoleProps) {
     return `${minutes}:${seconds}`;
   }, [secondsLeft]);
 
-  function nextSlide() {
-    setIndex((value) => Math.min(deck.slides.length - 1, value + 1));
-    setIsRunning(true);
-  }
-
-  function previousSlide() {
-    setIndex((value) => Math.max(-1, value - 1));
-  }
-
   function resetRound() {
     setIndex(-1);
     setSecondsLeft(secondsPerRound);
     setIsRunning(false);
   }
 
-  async function copyLink() {
+  async function copyLink(url: string) {
     if (!origin) {
       return;
     }
 
-    await navigator.clipboard?.writeText(`${origin}/play/${deck.id}`);
+    await navigator.clipboard?.writeText(url);
   }
 
   async function enterFullscreen() {
@@ -106,57 +150,29 @@ export function PlayConsole({ deck }: PlayConsoleProps) {
     }
   }
 
+  useEffect(() => {
+    if (!origin || isPresenter) {
+      return;
+    }
+
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(presenterUrl)}`;
+    setQrDataUrl(qrUrl);
+  }, [isPresenter, origin, presenterUrl]);
+
+  if (isPresenter) {
+    return (
+      <div className="play-shell presenter-shell">
+        <main className="stage presenter-stage">
+          <SlideStage deck={deck} slide={currentSlide} presenterMode />
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className={`play-shell ${isHostPanelOpen ? "" : "host-collapsed"}`}>
       <main className="stage">
-        <section
-          className={`slide-frame ${currentSlide ? "" : "is-cover"}`}
-          aria-live="polite"
-        >
-          {currentSlide ? (
-            <>
-              <div
-                className="slide-bg"
-                style={
-                  {
-                    "--slide-paper": currentSlide.palette.paper,
-                    "--accent-a": currentSlide.palette.accentA,
-                    "--accent-b": currentSlide.palette.accentB,
-                    "--accent-strong": currentSlide.palette.strong,
-                  } as CSSProperties
-                }
-              />
-              <div className="slide-content">
-                <span className="slide-kicker">{currentSlide.kicker}</span>
-                <div className="slide-main">
-                  <div className="slide-copy">
-                    <h1 className="slide-heading">{currentSlide.heading}</h1>
-                    <ul className="slide-points">
-                      {currentSlide.points.map((point) => (
-                        <li key={point}>{point}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <SlideVisual slide={currentSlide} />
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="slide-content">
-              <span className="slide-kicker">Presenter ready screen</span>
-              <div className="slide-main cover-main">
-                <div className="slide-copy">
-                  <h1 className="slide-heading">{deck.title}</h1>
-                  <ul className="slide-points">
-                    <li>Presenter has not seen these slides</li>
-                    <li>Advance with arrow keys or host controls</li>
-                    <li>No skipping once the round starts</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
+        <SlideStage deck={deck} slide={currentSlide} />
       </main>
 
       <button
@@ -175,89 +191,131 @@ export function PlayConsole({ deck }: PlayConsoleProps) {
       </button>
 
       {isHostPanelOpen ? (
-      <aside className="host-panel" aria-label="Host controls">
-        <div>
-          <p className="eyebrow">Host console</p>
-          <h2>{deck.title}</h2>
-          <p className="play-meta">
-            {deck.slides.length} slides · {deck.tone} · {deck.source === "openai" ? "AI generated" : "demo generated"}
-          </p>
-        </div>
+        <aside className="host-panel" aria-label="Host controls">
+          <div>
+            <p className="eyebrow">Host console</p>
+            <h2>{deck.title}</h2>
+            <p className="play-meta">
+              {deck.slides.length} slides · {deck.tone} ·{" "}
+              {deck.source === "openai" ? "AI generated" : "demo generated"}
+            </p>
+          </div>
 
-        <div className="timer-card">
-          <span>{slideLabel}</span>
-          <strong>{formattedTime}</strong>
-        </div>
+          <div className="timer-card">
+            <span>{slideLabel}</span>
+            <strong className={secondsLeft === 0 && isRunning ? "timer-ended" : ""}>
+              {formattedTime}
+            </strong>
+          </div>
 
-        <div className="slide-controls">
-          <button
-            className="icon-button"
-            type="button"
-            onClick={previousSlide}
-            disabled={index < 0}
-            title="Previous slide"
-            aria-label="Previous slide"
-          >
-            <SkipBack size={18} aria-hidden="true" />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={() => setIsRunning((value) => !value)}
-            title={isRunning ? "Pause timer" : "Start timer"}
-            aria-label={isRunning ? "Pause timer" : "Start timer"}
-          >
-            {isRunning ? <Pause size={18} aria-hidden="true" /> : <Play size={18} aria-hidden="true" />}
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={nextSlide}
-            disabled={index === deck.slides.length - 1}
-            title="Next slide"
-            aria-label="Next slide"
-          >
-            <SkipForward size={18} aria-hidden="true" />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={resetRound}
-            title="Reset round"
-            aria-label="Reset round"
-          >
-            <RotateCcw size={18} aria-hidden="true" />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={enterFullscreen}
-            title="Fullscreen"
-            aria-label="Fullscreen"
-          >
-            <Maximize2 size={18} aria-hidden="true" />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={copyLink}
-            title="Copy share link"
-            aria-label="Copy share link"
-          >
-            <Copy size={18} aria-hidden="true" />
-          </button>
-        </div>
+          <div className="slide-controls">
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => setIndex(Math.max(-1, index - 1))}
+              disabled={index < 0}
+              title="Previous slide"
+              aria-label="Previous slide"
+            >
+              <SkipBack size={18} aria-hidden="true" />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => setIsRunning((value) => !value)}
+              title={isRunning ? "Pause timer" : "Start timer"}
+              aria-label={isRunning ? "Pause timer" : "Start timer"}
+            >
+              {isRunning ? <Pause size={18} aria-hidden="true" /> : <Play size={18} aria-hidden="true" />}
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => {
+                setIndex(Math.min(deck.slides.length - 1, index + 1));
+                setIsRunning(true);
+              }}
+              disabled={index === deck.slides.length - 1}
+              title="Next slide"
+              aria-label="Next slide"
+            >
+              <SkipForward size={18} aria-hidden="true" />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={resetRound}
+              title="Reset round"
+              aria-label="Reset round"
+            >
+              <RotateCcw size={18} aria-hidden="true" />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={enterFullscreen}
+              title="Fullscreen"
+              aria-label="Fullscreen"
+            >
+              <Maximize2 size={18} aria-hidden="true" />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => copyLink(`${origin}/play/${deck.id}`)}
+              title="Copy host link"
+              aria-label="Copy host link"
+            >
+              <Copy size={18} aria-hidden="true" />
+            </button>
+          </div>
 
-        <label className="copy-field">
-          <span>Share link</span>
-          <input readOnly value={origin ? `${origin}/play/${deck.id}` : `/play/${deck.id}`} />
-        </label>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={autoAdvance}
+              onChange={(event) => setAutoAdvance(event.target.checked)}
+            />
+            <span>Auto-advance every {autoAdvanceSeconds}s while timer runs</span>
+          </label>
 
-        <p className="host-note">
-          Keep the presenter on the main screen. Host-only notes are stored with
-          the deck but intentionally hidden from the slideshow.
-        </p>
-      </aside>
+          {currentSlide ? (
+            <section className="host-cue-card" aria-label="Host cue">
+              <button
+                className="host-cue-toggle"
+                type="button"
+                onClick={() => setIsHostCueOpen((value) => !value)}
+                aria-expanded={isHostCueOpen}
+              >
+                Host cue
+              </button>
+              {isHostCueOpen ? <p>{currentSlide.speakerHidden}</p> : null}
+            </section>
+          ) : (
+            <p className="host-note">Advance to the first slide to reveal host-only cues.</p>
+          )}
+
+          <div className="presenter-share">
+            <label className="copy-field">
+              <span>Presenter screen</span>
+              <input readOnly value={presenterUrl} />
+            </label>
+            <div className="presenter-share-actions">
+              <a className="button secondary" href={presenterUrl} target="_blank" rel="noreferrer">
+                <ExternalLink size={16} aria-hidden="true" />
+                Open projector view
+              </a>
+              <button className="button secondary" type="button" onClick={() => copyLink(presenterUrl)}>
+                <Copy size={16} aria-hidden="true" />
+                Copy presenter link
+              </button>
+            </div>
+            {qrDataUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- external QR API URL
+              <img className="presenter-qr" src={qrDataUrl} alt="" width={120} height={120} />
+            ) : null}
+          </div>
+        </aside>
       ) : null}
     </div>
   );

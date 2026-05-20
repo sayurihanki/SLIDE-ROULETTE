@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="Slide Roulette hero">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#075956"/>
+      <stop offset="55%" stop-color="#0f7b78"/>
+      <stop offset="100%" stop-color="#245b74"/>
+    </linearGradient>
+    <linearGradient id="slide" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fff4dc"/>
+      <stop offset="100%" stop-color="#eaf6f4"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <circle cx="1320" cy="180" r="120" fill="#ef6b4f" opacity="0.55"/>
+  <circle cx="220" cy="700" r="160" fill="#f5bd2f" opacity="0.45"/>
+  <rect x="180" y="140" width="760" height="470" rx="24" fill="url(#slide)" opacity="0.95"/>
+  <rect x="240" y="210" width="280" height="28" rx="8" fill="#0f7b78" opacity="0.85"/>
+  <rect x="240" y="270" width="520" height="56" rx="10" fill="#182022" opacity="0.88"/>
+  <rect x="240" y="360" width="360" height="18" rx="6" fill="#ef6b4f" opacity="0.8"/>
+  <rect x="240" y="395" width="300" height="18" rx="6" fill="#65a7c8" opacity="0.8"/>
+  <rect x="980" y="220" width="360" height="300" rx="18" fill="#ffffff" opacity="0.9"/>
+  <circle cx="1100" cy="360" r="70" fill="#ef6b4f" opacity="0.7"/>
+  <circle cx="1240" cy="360" r="70" fill="#65a7c8" opacity="0.7"/>
+  <rect x="1040" y="500" width="240" height="16" rx="6" fill="#6e5bc7" opacity="0.75"/>
+  <rect x="1020" y="120" width="420" height="520" rx="28" fill="none" stroke="#f5bd2f" stroke-width="10" opacity="0.8"/>
+  <text x="180" y="760" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="54" font-weight="800">Slide Roulette</text>
+</svg>

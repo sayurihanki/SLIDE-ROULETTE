@@ -74,6 +74,7 @@ export const DeckSchema = z.object({
   source: z.enum(["openai", "fallback"]),
   createdAt: z.string().datetime(),
   slides: z.array(SlideSchema).min(6).max(12),
+  generation: DeckRequestSchema.optional(),
 });
 
 export type DeckRequest = z.infer<typeof DeckRequestSchema>;
@@ -176,6 +177,7 @@ export function completeDeck(
     theme: request.theme,
     source,
     createdAt: new Date().toISOString(),
+    generation: request,
     slides: partial.slides.map((slide, index) => ({
       ...slide,
       id: slide.id || `${id}-${index + 1}`,
