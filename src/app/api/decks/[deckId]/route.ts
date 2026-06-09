@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { DeckSchema } from "@/lib/deck";
 import { getDeck, saveDeck } from "@/lib/store";
 import { regenerateDeck, swapDeckSlide } from "@/lib/generator";
 
@@ -7,10 +8,12 @@ const PatchSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("regenerate"),
     tweak: z.enum(["safer", "sillier", "shorter"]).optional(),
+    deck: DeckSchema.optional(),
   }),
   z.object({
     action: z.literal("swap-slide"),
     slideIndex: z.number().int().min(0),
+    deck: DeckSchema.optional(),
   }),
 ]);
 
@@ -33,17 +36,17 @@ export async function GET(_request: Request, context: RouteContext) {
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const { deckId } = await context.params;
-  const deck = await getDeck(deckId);
-
-  if (!deck) {
-    return NextResponse.json({ error: "Deck not found" }, { status: 404 });
-  }
-
   const body = await request.json().catch(() => null);
   const parsed = PatchSchema.safeParse(body);
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid deck update request" }, { status: 400 });
+  }
+
+  const deck = (await getDeck(deckId)) || parsed.data.deck;
+
+  if (!deck || deck.id !== deckId) {
+    return NextResponse.json({ error: "Deck not found" }, { status: 404 });
   }
 
   try {

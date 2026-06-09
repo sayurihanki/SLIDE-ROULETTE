@@ -23,8 +23,12 @@ type PlayConsoleProps = {
   mode?: "host" | "presenter";
 };
 
-const secondsPerRound = 240;
+const defaultRoundSeconds = 120;
 const autoAdvanceSeconds = 28;
+
+function minutesToSeconds(minutes: number) {
+  return Math.max(1, Math.round(minutes * 60));
+}
 
 export function PlayConsole({ deck, mode = "host" }: PlayConsoleProps) {
   const searchParams = useSearchParams();
@@ -34,13 +38,16 @@ export function PlayConsole({ deck, mode = "host" }: PlayConsoleProps) {
     : -1;
   const isPresenter = mode === "presenter";
 
-  const { index, setIndex } = useSlideSync({
+  const { index, setIndex, wordless, setWordless } = useSlideSync({
     deckId: deck.id,
     role: isPresenter ? "presenter" : "host",
     initialIndex,
+    initialWordless: deck.generation?.noWords || false,
   });
 
-  const [secondsLeft, setSecondsLeft] = useState(secondsPerRound);
+  const [roundSeconds, setRoundSeconds] = useState(defaultRoundSeconds);
+  const [roundMinutesInput, setRoundMinutesInput] = useState("2");
+  const [secondsLeft, setSecondsLeft] = useState(defaultRoundSeconds);
   const [isRunning, setIsRunning] = useState(false);
   const [isHostPanelOpen, setIsHostPanelOpen] = useState(!isPresenter);
   const [isHostCueOpen, setIsHostCueOpen] = useState(true);
@@ -132,7 +139,21 @@ export function PlayConsole({ deck, mode = "host" }: PlayConsoleProps) {
 
   function resetRound() {
     setIndex(-1);
-    setSecondsLeft(secondsPerRound);
+    setSecondsLeft(roundSeconds);
+    setIsRunning(false);
+  }
+
+  function updateRoundLength(value: string) {
+    setRoundMinutesInput(value);
+
+    const minutes = Number(value);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      return;
+    }
+
+    const nextSeconds = minutesToSeconds(minutes);
+    setRoundSeconds(nextSeconds);
+    setSecondsLeft(nextSeconds);
     setIsRunning(false);
   }
 
@@ -163,7 +184,7 @@ export function PlayConsole({ deck, mode = "host" }: PlayConsoleProps) {
     return (
       <div className="play-shell presenter-shell">
         <main className="stage presenter-stage">
-          <SlideStage deck={deck} slide={currentSlide} presenterMode />
+          <SlideStage deck={deck} slide={currentSlide} presenterMode wordless={wordless} />
         </main>
       </div>
     );
@@ -172,7 +193,7 @@ export function PlayConsole({ deck, mode = "host" }: PlayConsoleProps) {
   return (
     <div className={`play-shell ${isHostPanelOpen ? "" : "host-collapsed"}`}>
       <main className="stage">
-        <SlideStage deck={deck} slide={currentSlide} />
+        <SlideStage deck={deck} slide={currentSlide} wordless={wordless} />
       </main>
 
       <button
@@ -207,6 +228,20 @@ export function PlayConsole({ deck, mode = "host" }: PlayConsoleProps) {
               {formattedTime}
             </strong>
           </div>
+
+          <label className="round-length-control">
+            <span>Round length</span>
+            <span className="round-length-input">
+              <input
+                type="number"
+                min="0.1"
+                step="0.25"
+                value={roundMinutesInput}
+                onChange={(event) => updateRoundLength(event.target.value)}
+              />
+              <span>min</span>
+            </span>
+          </label>
 
           <div className="slide-controls">
             <button
@@ -277,6 +312,15 @@ export function PlayConsole({ deck, mode = "host" }: PlayConsoleProps) {
               onChange={(event) => setAutoAdvance(event.target.checked)}
             />
             <span>Auto-advance every {autoAdvanceSeconds}s while timer runs</span>
+          </label>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={wordless}
+              onChange={(event) => setWordless(event.target.checked)}
+            />
+            <span>Simple mode</span>
           </label>
 
           {currentSlide ? (

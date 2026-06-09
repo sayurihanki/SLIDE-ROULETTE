@@ -27,6 +27,26 @@ export const visualTypes = [
   "canvas",
   "bento",
   "isometric",
+  "swimlane",
+  "sankey",
+  "gauge_row",
+  "stacked_bar",
+  "pie_callout",
+  "scatter_plot",
+  "waterfall",
+  "gantt",
+  "donut_progress",
+  "lollipop_chart",
+  "slope_chart",
+  "bubble_map",
+  "decision_tree",
+  "fishbone",
+  "swot_grid",
+  "journey_map",
+  "calendar_strip",
+  "ranking_ladder",
+  "traffic_light",
+  "sticky_wall",
 ] as const;
 
 export const visualVariants = ["classic", "poster", "blueprint", "field-note"] as const;
@@ -43,8 +63,13 @@ export const DeckRequestSchema = z.object({
   theme: z.string().trim().min(2).max(120),
   themeDescription: z.string().trim().max(300).optional().default(""),
   tone: z.enum(tones),
-  slideCount: z.coerce.number().int().min(6).max(12),
+  slideCount: z.coerce.number().int().min(5).max(10),
   insideJokes: z.string().trim().max(300).optional().default(""),
+  noWords: z.boolean().optional().default(false),
+});
+
+export const DeckGenerationSchema = DeckRequestSchema.extend({
+  slideCount: z.coerce.number().int().min(5).max(12),
 });
 
 export const VisualDataSchema = z.object({
@@ -82,8 +107,8 @@ export const DeckSchema = z.object({
   theme: z.string().min(2).max(120),
   source: z.enum(["openai", "fallback"]),
   createdAt: z.string().datetime(),
-  slides: z.array(SlideSchema).min(6).max(12),
-  generation: DeckRequestSchema.optional(),
+  slides: z.array(SlideSchema).min(5).max(12),
+  generation: DeckGenerationSchema.optional(),
 });
 
 export type DeckRequest = z.infer<typeof DeckRequestSchema>;
@@ -113,6 +138,7 @@ export const deckGenerationJsonSchema = {
           "points",
           "visualLabel",
           "visualType",
+          "visualVariant",
           "visualData",
           "visualPrompt",
           "speakerHidden",

@@ -1,19 +1,28 @@
 import type { CSSProperties } from "react";
 import type { KaraokeDeck, KaraokeSlide } from "@/lib/deck";
 import { SlideVisual } from "@/components/slide-visual";
+import { shouldShowSlideDetails, shouldShowSlideKicker } from "@/lib/slide-visibility";
 
 type SlideStageProps = {
   deck: KaraokeDeck;
   slide: KaraokeSlide | null;
   presenterMode?: boolean;
+  wordless?: boolean;
 };
 
-export function SlideStage({ deck, slide, presenterMode = false }: SlideStageProps) {
+export function SlideStage({
+  deck,
+  slide,
+  presenterMode = false,
+  wordless = false,
+}: SlideStageProps) {
+  const simpleMode = wordless;
   const frameClass = [
     "slide-frame",
     slide ? "" : "is-cover",
     slide ? `kind-${slide.kind}` : "",
     presenterMode ? "presenter-mode" : "",
+    slide && simpleMode ? "is-simple" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -45,35 +54,36 @@ export function SlideStage({ deck, slide, presenterMode = false }: SlideStagePro
     "--accent-strong": slide.palette.strong,
   } as CSSProperties;
 
-  const quoteText = slide.kind === "quote" ? slide.heading : null;
+  const showKicker = shouldShowSlideKicker(simpleMode);
+  const showDetails = shouldShowSlideDetails(simpleMode);
 
   return (
     <section className={frameClass} aria-live="polite">
       <div className="slide-bg" style={paletteStyle} />
       <div className="slide-content">
-        <span className="slide-kicker">{slide.kicker}</span>
+        {showKicker ? <span className="slide-kicker">{slide.kicker}</span> : null}
         <div className="slide-main">
           <div className="slide-copy">
-            {slide.kind === "quote" ? (
-              <blockquote className="slide-quote">{quoteText}</blockquote>
+            {slide.kind === "quote" && showDetails ? (
+              <blockquote className="slide-quote">{slide.heading}</blockquote>
             ) : (
               <h1 className="slide-heading">{slide.heading}</h1>
             )}
-            {slide.kind !== "quote" && slide.points.length > 0 ? (
+            {showDetails && slide.kind !== "quote" && slide.points.length > 0 ? (
               <ul className="slide-points">
                 {slide.points.map((point) => (
                   <li key={point}>{point}</li>
                 ))}
               </ul>
             ) : null}
-            {slide.kind === "quote" && slide.points.length > 0 ? (
+            {showDetails && slide.kind === "quote" && slide.points.length > 0 ? (
               <p className="slide-quote-attribution">{slide.points[0]}</p>
             ) : null}
-            {slide.kind === "wildcard" && slide.points[1] ? (
+            {showDetails && slide.kind === "wildcard" && slide.points[1] ? (
               <p className="slide-wildcard-callout">{slide.points[1]}</p>
             ) : null}
           </div>
-          <SlideVisual slide={slide} />
+          <SlideVisual slide={slide} wordless={simpleMode} />
         </div>
       </div>
     </section>

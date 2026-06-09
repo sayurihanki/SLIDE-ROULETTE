@@ -11,7 +11,11 @@ type DeckStore = Record<string, KaraokeDeck>;
 export async function saveDeck(deck: KaraokeDeck): Promise<KaraokeDeck> {
   const validated = DeckSchema.parse(deck);
   await writeRemoteDeck(validated);
-  await writeFileDeck(validated);
+  await writeFileDeck(validated).catch((error: unknown) => {
+    if (!isFileStoreUnavailable(error)) {
+      throw error;
+    }
+  });
   return validated;
 }
 
@@ -62,6 +66,14 @@ async function readFileStore(): Promise<DeckStore> {
 
 function deckKey(id: string) {
   return `slide-roulette:deck:${id}`;
+}
+
+function isFileStoreUnavailable(error: unknown) {
+  if (!(error instanceof Error) || !("code" in error)) {
+    return false;
+  }
+
+  return ["EACCES", "EPERM", "EROFS"].includes(String(error.code));
 }
 
 async function readRemoteDeck(id: string): Promise<KaraokeDeck | null> {

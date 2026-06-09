@@ -5,7 +5,7 @@ const featureCards = [
   {
     icon: Sparkles,
     title: "Generate surprising slides",
-    body: "Give the app an audience, tone, and theme. It returns readable surprise slides built for improvisation.",
+    body: "Start with an event and theme. Audience details and inside jokes are optional flavor.",
   },
   {
     icon: MonitorPlay,
@@ -49,12 +49,12 @@ export default function Home() {
       <section className="stat-strip" aria-label="Game defaults">
         <div>
           <p>
-            <strong>8-10</strong>
+            <strong>5-10</strong>
             <span>slides per deck</span>
           </p>
           <p>
-            <strong>3-5</strong>
-            <span>minutes per presenter</span>
+            <strong>2+</strong>
+            <span>configurable minutes</span>
           </p>
           <p>
             <strong>0</strong>

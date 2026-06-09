@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Shuffle, WandSparkles } from "lucide-react";
 import { tones } from "@/lib/deck";
+import { saveDeckToBrowser } from "@/lib/browser-deck-cache";
 import {
   audienceLabels,
   themeCategories,
@@ -22,15 +23,28 @@ const toneLabels: Record<(typeof tones)[number], string> = {
   deadpan: "Deadpan",
 };
 
+const defaultEventContext = "Lehi SC Training";
+const defaultAudience = "Tech Pre-Sales Teammates";
+const defaultSlideCount = 5;
+const defaultThemePool = themeOptions.filter(
+  (option) => option.workSafeLevel === "safe" && option.audiences.includes("company"),
+);
+
+function pickRandomTheme(pool: ThemeOption[]) {
+  const options = pool.length > 0 ? pool : themeOptions;
+  return options[Math.floor(Math.random() * options.length)];
+}
+
 export function GenerateDeckForm() {
   const router = useRouter();
-  const [slideCount, setSlideCount] = useState(8);
+  const [slideCount, setSlideCount] = useState(defaultSlideCount);
   const [tone, setTone] = useState<(typeof tones)[number]>("polished");
   const [category, setCategory] = useState<ThemeCategory | "All">("All");
-  const [audienceFilter, setAudienceFilter] = useState<AudienceHint | "all">("all");
+  const [audienceFilter, setAudienceFilter] = useState<AudienceHint | "all">("company");
   const [themeValue, setThemeValue] = useState("");
   const [themeDescription, setThemeDescription] = useState("");
   const [themeStatus, setThemeStatus] = useState("");
+  const [noWords, setNoWords] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
@@ -48,6 +62,13 @@ export function GenerateDeckForm() {
       audienceFilter === "all" || option.audiences.includes(audienceFilter);
     return matchesCategory && matchesAudience;
   });
+
+  useEffect(() => {
+    const option = pickRandomTheme(defaultThemePool);
+    setThemeValue(option.theme);
+    setThemeDescription(option.desc);
+    setThemeStatus(`Random pick: ${option.theme}`);
+  }, []);
 
   function selectTheme(option: ThemeOption) {
     setThemeValue(option.theme);
@@ -81,6 +102,7 @@ export function GenerateDeckForm() {
       tone,
       slideCount,
       insideJokes: String(formData.get("insideJokes") || ""),
+      noWords,
     };
 
     try {
@@ -97,6 +119,7 @@ export function GenerateDeckForm() {
         throw new Error(data.error || "Deck generation failed.");
       }
 
+      saveDeckToBrowser(data.deck);
       router.push(`/review/${data.deck.id}`);
     } catch (submissionError) {
       setError(
@@ -118,6 +141,7 @@ export function GenerateDeckForm() {
           id="eventContext"
           name="eventContext"
           required
+          defaultValue={defaultEventContext}
           minLength={3}
           maxLength={300}
           placeholder="Company offsite after lunch, mixed departments"
@@ -129,6 +153,7 @@ export function GenerateDeckForm() {
         <input
           id="audience"
           name="audience"
+          defaultValue={defaultAudience}
           minLength={2}
           maxLength={200}
           placeholder="Product, design, ops, and sales teammates"
@@ -242,14 +267,14 @@ export function GenerateDeckForm() {
             id="slideCount"
             name="slideCount"
             type="range"
-            min="6"
-            max="12"
+            min="5"
+            max="10"
             value={slideCount}
             onChange={(event) => setSlideCount(Number(event.target.value))}
           />
           <strong>{slideCount}</strong>
         </div>
-        <span className="field-help">8-10 works well for a short in-person round.</span>
+        <span className="field-help">5 slides is the quick default; use up to 10 for a longer round.</span>
       </div>
 
       <div className="field">
@@ -262,6 +287,18 @@ export function GenerateDeckForm() {
         />
         <span className="field-help">Add a few light references, or skip this entirely.</span>
       </div>
+
+      <label className="form-toggle-row">
+        <input
+          type="checkbox"
+          checked={noWords}
+          onChange={(event) => setNoWords(event.target.checked)}
+        />
+        <span>
+          <strong>Simple mode</strong>
+          <small>Slides keep their shape with a short heading, tiny labels, and fewer distractions.</small>
+        </span>
+      </label>
 
       {error ? <p className="form-error">{error}</p> : null}
       {isSubmitting ? <p className="generation-progress">{progressMessages[progressStep]}</p> : null}

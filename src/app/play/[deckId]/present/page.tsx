@@ -1,6 +1,5 @@
 import { Suspense } from "react";
-import { notFound } from "next/navigation";
-import { PlayConsole } from "@/components/play-console";
+import { PlayConsoleLoader } from "@/components/play-console-loader";
 import { getDeck } from "@/lib/store";
 
 type PresentPageProps = {
@@ -13,14 +12,10 @@ export default async function PresentPage({ params }: PresentPageProps) {
   const { deckId } = await params;
   const deck = await getDeck(deckId);
 
-  if (!deck) {
-    notFound();
-  }
-
   return (
     <div className="play-page presenter-page">
       <Suspense fallback={null}>
-        <PlayConsole deck={deck} mode="presenter" />
+        <PlayConsoleLoader deckId={deckId} initialDeck={deck} mode="presenter" />
       </Suspense>
     </div>
   );

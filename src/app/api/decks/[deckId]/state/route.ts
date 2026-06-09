@@ -6,6 +6,7 @@ const StateSchema = z.object({
   index: z.number().int().min(-1),
   secondsLeft: z.number().int().min(0).max(600),
   isRunning: z.boolean(),
+  wordless: z.boolean().optional(),
 });
 
 type RouteContext = {

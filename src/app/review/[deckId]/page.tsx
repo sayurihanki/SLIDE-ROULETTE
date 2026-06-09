@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { DeckReview } from "@/components/deck-review";
+import { DeckReviewLoader } from "@/components/deck-review-loader";
 import { getDeck } from "@/lib/store";
 
 type ReviewPageProps = {
@@ -13,13 +12,9 @@ export default async function ReviewPage({ params }: ReviewPageProps) {
   const { deckId } = await params;
   const deck = await getDeck(deckId);
 
-  if (!deck) {
-    notFound();
-  }
-
   return (
     <main className="main review-page">
-      <DeckReview deck={deck} />
+      <DeckReviewLoader deckId={deckId} initialDeck={deck} />
       <p className="review-back">
         <Link href="/generate">Back to generator</Link>
       </p>

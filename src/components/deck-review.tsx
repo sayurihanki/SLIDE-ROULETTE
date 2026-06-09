@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, RefreshCw, Shuffle, WandSparkles } from "lucide-react";
 import type { KaraokeDeck } from "@/lib/deck";
+import { saveDeckToBrowser } from "@/lib/browser-deck-cache";
 
 type DeckReviewProps = {
   deck: KaraokeDeck;
@@ -17,6 +18,10 @@ export function DeckReview({ deck: initialDeck }: DeckReviewProps) {
   const [error, setError] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
 
+  useEffect(() => {
+    saveDeckToBrowser(deck);
+  }, [deck]);
+
   async function patchDeck(body: Record<string, unknown>) {
     setError("");
     setBusyAction(String(body.action));
@@ -25,7 +30,7 @@ export function DeckReview({ deck: initialDeck }: DeckReviewProps) {
       const response = await fetch(`/api/decks/${deck.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, deck }),
       });
       const data = await response.json();
 

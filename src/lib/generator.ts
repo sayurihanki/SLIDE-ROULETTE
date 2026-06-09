@@ -1,17 +1,22 @@
 import {
   DeckRequest,
+  DeckGenerationSchema,
   DeckRequestSchema,
   DeckSchema,
   KaraokeDeck,
   KaraokeSlide,
   SlideSchema,
-  VisualData,
   VisualType,
   completeDeck,
   deckGenerationJsonSchema,
   visualTypes,
-  visualVariants,
 } from "@/lib/deck";
+import { planDeckComposition, SlideCompositionSpec } from "@/lib/composition-planner";
+import { evaluateDeckQuality } from "@/lib/deck-quality";
+import { buildFallbackVisualData } from "@/lib/fallback-visuals";
+import { buildKeywordBank, clip, parseJokes, significantWords, titleCase } from "@/lib/keyword-bank";
+import { pick, rotate, seededRandom, shuffle } from "@/lib/random";
+import { getVisualEntry, visualAliases } from "@/lib/visual-registry";
 
 type GeneratedDeckShape = Pick<KaraokeDeck, "title" | "slides">;
 
@@ -21,65 +26,6 @@ const fallbackPalettes: KaraokeSlide["palette"][] = [
   { paper: "#f7edf4", accentA: "#6e5bc7", accentB: "#f5bd2f", strong: "#513f9e" },
   { paper: "#edf3fb", accentA: "#65a7c8", accentB: "#ef6b4f", strong: "#245b74" },
 ];
-
-const slideKinds: KaraokeSlide["kind"][] = [
-  "title",
-  "chart",
-  "quote",
-  "diagram",
-  "wildcard",
-  "chart",
-  "quote",
-  "diagram",
-  "wildcard",
-  "chart",
-  "quote",
-  "diagram",
-];
-
-const fallbackVisualTypes: VisualType[] = [
-  "venn",
-  "comparison_table",
-  "before_after",
-  "quadrant",
-  "flowchart",
-  "funnel",
-  "cycle",
-  "timeline",
-  "hierarchy",
-  "pyramid",
-  "network",
-  "dashboard",
-  "radar",
-  "heat_matrix",
-  "canvas",
-  "bento",
-  "isometric",
-];
-
-const fillerWords = new Set([
-  "about",
-  "after",
-  "audience",
-  "committee",
-  "company",
-  "deck",
-  "event",
-  "friend",
-  "friends",
-  "general",
-  "local",
-  "night",
-  "party",
-  "people",
-  "presentation",
-  "strategy",
-  "team",
-  "the",
-  "this",
-  "with",
-  "work",
-]);
 
 const motionWords = [
   "Signals",
@@ -111,32 +57,13 @@ const visualNouns = [
   "Blueprint",
 ];
 
-const visualAliases: Record<VisualType, string[]> = {
-  venn: ["venn diagram", "euler diagram", "overlap diagram"],
-  comparison_table: ["comparison table", "pros and cons", "feature matrix"],
-  before_after: ["before vs after", "current state vs future state"],
-  quadrant: ["quadrant chart", "perceptual map", "impact vs effort matrix"],
-  flowchart: ["flowchart", "workflow", "decision flow", "user flow"],
-  funnel: ["sales funnel", "pipeline", "conversion funnel"],
-  cycle: ["cycle diagram", "feedback loop", "flywheel"],
-  timeline: ["timeline", "roadmap", "milestone timeline", "release schedule"],
-  hierarchy: ["org chart", "tree diagram", "taxonomy", "decision tree"],
-  pyramid: ["pyramid", "tier diagram", "layer cake", "capability stack"],
-  network: ["network diagram", "ecosystem map", "system architecture"],
-  dashboard: ["kpi dashboard", "scorecard", "gauge chart", "bullet chart"],
-  radar: ["radar chart", "spider diagram", "capability radar"],
-  heat_matrix: ["heatmap", "risk matrix", "correlation matrix"],
-  canvas: ["lean canvas", "business model canvas", "strategy map"],
-  bento: ["bento grid", "modular layout", "floating ui panels"],
-  isometric: ["isometric blocks", "architecture layers", "stack diagram"],
-};
-
 export type DeckPromptOptions = {
   tweak?: "safer" | "sillier" | "shorter";
   replaceSlideIndex?: number;
   deckTitle?: string;
   neighborHeadings?: string[];
   singleSlide?: boolean;
+  compositionPlan?: SlideCompositionSpec[];
 };
 
 export function applyDeckTweak(
@@ -146,7 +73,7 @@ export function applyDeckTweak(
   if (tweak === "shorter") {
     return {
       ...request,
-      slideCount: Math.max(6, request.slideCount - 1),
+      slideCount: Math.max(5, request.slideCount - 1),
     };
   }
 
@@ -165,6 +92,16 @@ export function buildDeckPrompt(request: DeckRequest, options?: DeckPromptOption
     ? `Optional inside-joke ingredients to use lightly: ${request.insideJokes}.`
     : "No inside jokes were provided.";
   const slideCount = options?.singleSlide ? 1 : request.slideCount;
+  const compositionPlan =
+    options?.compositionPlan ||
+    planDeckComposition({ ...request, slideCount }, `prompt:${request.theme}:${slideCount}`);
+  const planLines = compositionPlan
+    .slice(0, slideCount)
+    .map((spec) => {
+      const entry = getVisualEntry(spec.visualType);
+      return `${spec.index + 1}. kind=${spec.kind}; visualType=${spec.visualType}; visualVariant=${spec.visualVariant}; role=${spec.narrativeRole}; labels=${entry.labelSlots.min}-${entry.labelSlots.max}; values=${entry.labelSlots.values ? "use numeric values" : "values optional"}; why=${spec.affinityNotes}`;
+    })
+    .join("\n");
   const tweakLine =
     options?.tweak === "safer"
       ? "Extra constraint: keep every joke broad, inclusive, and workplace-safe. No edgy punchlines."
@@ -177,6 +114,9 @@ export function buildDeckPrompt(request: DeckRequest, options?: DeckPromptOption
     typeof options?.replaceSlideIndex === "number"
       ? `Generate exactly 1 replacement slide for position ${options.replaceSlideIndex + 1} in deck "${options.deckTitle || request.theme}". Neighbor headings: ${(options.neighborHeadings || []).join(" | ") || "none"}.`
       : null;
+  const wordlessLine = request.noWords
+    ? "Simple mode: visible slides keep the same layout with one short heading and short diagram labels. Bullets, captions, quote attribution, and extra callouts are hidden on the slide, so use 4-8 word headings and 1-3 word labels while still filling all text fields for review, host cues, accessibility, and regeneration."
+    : "Normal mode: make the copy theme-coherent, but avoid repeating the exact same theme phrase on every slide.";
 
   return [
     options?.singleSlide
@@ -188,20 +128,24 @@ export function buildDeckPrompt(request: DeckRequest, options?: DeckPromptOption
     request.themeDescription ? `Theme angle: ${request.themeDescription}.` : "No curated theme angle was provided.",
     `Tone: ${request.tone}.`,
     `Slide count: exactly ${slideCount}.`,
+    wordlessLine,
     jokes,
     replaceLine,
     tweakLine,
     "The presenter has not seen the slides and must improvise.",
     "Shape the deck as a fake briefing arc: opening thesis, escalating odd evidence, one crisis slide, a suspicious chart, then a bold recommendation.",
+    "Follow this slide plan exactly for kind, visualType, and visualVariant. Fill only the copy and visualData content:",
+    planLines,
     "Do not repeat the same visualType on consecutive slides.",
-    "Vary slide kind across title, chart, quote, diagram, and wildcard.",
     "Make every slide readable on a projector: one big idea, short headings, at most three concise bullets.",
     "Keep it work-safe, inclusive, and broadly understandable.",
     "Avoid real private people, protected brand claims, politics, explicit material, slurs, medical/legal/financial advice, and dense charts.",
     "Use playful business-slide formats: suspicious charts, faux frameworks, bold quotes, questionable roadmaps, and harmless absurdity.",
-    `Choose varied visualType values across the deck from: ${visualTypes.join(", ")}.`,
+    `Valid visualType values are: ${visualTypes.join(", ")}.`,
     `Map familiar diagram names onto those types, such as: ${Object.values(visualAliases).flat().join(", ")}.`,
-    "For visualData, write a short title, 2-8 concise labels, 0-8 numeric values from 0 to 100 when useful, and 0-4 short notes.",
+    "For visualData, write a short title, labels that match each planned slot count, numeric values from 0 to 100 only when useful, and 0-4 short notes.",
+    "Labels must name concrete entities from the theme or event. Do not use generic labels like Signal, Proof, Risk, Phase one, or Outcome.",
+    "Do not reuse the same visible phrase across multiple headings, labels, or bullets unless the deck is intentionally calling back to it.",
     "speakerHidden is for the host only and must not be required to understand the slide. Give actionable host cues like callbacks, pacing, or audience prompts.",
     "Return only JSON that matches the provided schema.",
   ]
@@ -213,22 +157,24 @@ export async function generateDeck(
   request: DeckRequest,
   options?: DeckPromptOptions,
 ): Promise<KaraokeDeck> {
-  const openAiDeck = await tryOpenAiDeck(request, options);
+  const seed = crypto.randomUUID();
+  const compositionPlan = planDeckComposition(request, seed);
+  const openAiDeck = await tryOpenAiDeck(request, { ...options, compositionPlan });
 
   if (openAiDeck) {
-    return completeDeck(openAiDeck, request, "openai");
+    return completeDeck(repairDeckWithFallback(openAiDeck, request, compositionPlan, seed), request, "openai");
   }
 
-  return completeDeck(createFallbackDeck(request), request, "fallback");
+  return completeDeck(createFallbackDeck(request, seed), request, "fallback");
 }
 
 export async function regenerateDeck(
   deck: KaraokeDeck,
   tweak?: "safer" | "sillier" | "shorter",
 ): Promise<KaraokeDeck> {
-  const baseRequest =
+  const generation =
     deck.generation ||
-    DeckRequestSchema.parse({
+    DeckGenerationSchema.parse({
       eventContext: "Live event remix",
       audience: deck.audience,
       theme: deck.theme,
@@ -237,6 +183,10 @@ export async function regenerateDeck(
       slideCount: deck.slides.length,
       insideJokes: "",
     });
+  const baseRequest = DeckRequestSchema.parse({
+    ...generation,
+    slideCount: Math.min(10, Math.max(5, generation.slideCount)),
+  });
 
   const request = tweak ? applyDeckTweak(baseRequest, tweak) : baseRequest;
   const generated = await generateDeck(request, { tweak });
@@ -279,16 +229,20 @@ export async function generateReplacementSlide(
   request: DeckRequest,
   options: Pick<DeckPromptOptions, "replaceSlideIndex" | "deckTitle" | "neighborHeadings">,
 ): Promise<KaraokeSlide> {
+  const seed = crypto.randomUUID();
+  const compositionPlan = planDeckComposition({ ...request, slideCount: 1 }, seed);
   const openAiDeck = await tryOpenAiDeck(request, {
     ...options,
     singleSlide: true,
+    compositionPlan,
   });
 
   if (openAiDeck?.slides[0]) {
-    return SlideSchema.parse({ ...openAiDeck.slides[0], id: `generated-${options.replaceSlideIndex ?? 0}` });
+    const repaired = repairDeckWithFallback(openAiDeck, { ...request, slideCount: 1 }, compositionPlan, seed);
+    return SlideSchema.parse({ ...repaired.slides[0], id: `generated-${options.replaceSlideIndex ?? 0}` });
   }
 
-  const fallback = createFallbackDeck({ ...request, slideCount: 1 });
+  const fallback = createFallbackDeck({ ...request, slideCount: 1 }, seed);
   return SlideSchema.parse({
     ...fallback.slides[0],
     id: `fallback-${(options.replaceSlideIndex ?? 0) + 1}`,
@@ -350,7 +304,13 @@ async function tryOpenAiDeck(
 
     const parsed = JSON.parse(outputText) as GeneratedDeckShape;
     const normalizedSlides = parsed.slides.map((slide, index) =>
-      SlideSchema.parse({ ...slide, id: `generated-${index + 1}` }),
+      SlideSchema.parse({
+        ...slide,
+        kind: options?.compositionPlan?.[index]?.kind || slide.kind,
+        visualType: options?.compositionPlan?.[index]?.visualType || slide.visualType,
+        visualVariant: options?.compositionPlan?.[index]?.visualVariant || slide.visualVariant,
+        id: `generated-${index + 1}`,
+      }),
     );
 
     return DeckSchema.pick({ title: true, slides: true }).parse({
@@ -411,80 +371,105 @@ export function createFallbackDeck(
 ): GeneratedDeckShape {
   const random = seededRandom(seed);
   const keywords = buildKeywordBank(request);
-  const visualOrder = shuffle([...fallbackVisualTypes], random);
-  const variantOrder = shuffle([...visualVariants], random);
+  const compositionPlan = planDeckComposition(request, seed);
   const paletteOrder = shuffle([...fallbackPalettes], random);
   const usedHeadings = new Set<string>();
   const usedVisualLabels = new Set<string>();
   const titleStyle = pick(["Briefing", "Field Report", "Operating Model", "Forecast"], random);
   const title = `${titleCase(request.theme)}: A Totally Prepared ${titleStyle}`;
 
-  const slides = Array.from({ length: request.slideCount }, (_, index) => {
-    const visualType = visualOrder[index % visualOrder.length];
-    const visualVariant = variantOrder[index % variantOrder.length];
+  const slides = compositionPlan.map((spec, index) => {
+    const visualType = spec.visualType;
     const slideKeywords = rotate(keywords, index);
     const visualLabel = uniqueText(
-      fallbackVisual(visualType, index, slideKeywords, random),
+      fallbackVisual(spec, index, slideKeywords, random),
       usedVisualLabels,
       index,
       64,
     );
-    const visualData = fallbackVisualData(visualType, index, request, slideKeywords, visualLabel, random);
+    const visualData = buildFallbackVisualData(spec, request, slideKeywords, visualLabel, random);
 
     return {
       id: `fallback-${index + 1}`,
-      kind: slideKinds[index],
-      kicker: fallbackKicker(index, visualType, slideKeywords, random),
-      heading: uniqueText(fallbackHeading(index, request, visualType, slideKeywords, random), usedHeadings, index, 92),
-      points: fallbackPoints(index, request, slideKeywords, random),
+      kind: spec.kind,
+      kicker: fallbackKicker(spec, index, slideKeywords, random),
+      heading: uniqueText(fallbackHeading(spec, index, request, slideKeywords, random), usedHeadings, index, 92),
+      points: fallbackPoints(spec, request, slideKeywords, random),
       visualLabel,
       visualType,
-      visualVariant,
+      visualVariant: spec.visualVariant,
       visualData,
       visualPrompt: `${visualLabel} about ${request.theme} using ${slideKeywords.slice(0, 3).join(", ")}`,
-      speakerHidden: `Host note: ask why ${slideKeywords[0]} became the obvious turning point.`,
+      speakerHidden: fallbackSpeakerHidden(spec, request, slideKeywords, random),
       palette: paletteOrder[index % paletteOrder.length],
     } satisfies KaraokeSlide;
   });
 
-  return { title, slides };
+  return repairDeckWithFallback({ title, slides }, request, compositionPlan, seed);
 }
 
 function fallbackKicker(
+  spec: SlideCompositionSpec,
   index: number,
-  visualType: VisualType,
   keywords: string[],
   random: () => number,
 ): string {
+  const visualType = spec.visualType;
   const options = [
     `${keywords[0]} Signal`,
     `${visualTypeLabel(visualType)} Evidence`,
-    `${keywords[1]} Forecast`,
+    `${titleCase(spec.narrativeRole)} Brief`,
+    `${keywords[1]} ${spec.narrativeRole}`,
     `${pick(motionWords, random)} Review`,
-    `Finding ${index + 1}`,
     `${keywords[2]} Model`,
+    `${visualTypeLabel(visualType)} Snapshot`,
   ];
 
   return clip(pick(options, random), 42);
 }
 
 function fallbackHeading(
+  spec: SlideCompositionSpec,
   index: number,
   request: DeckRequest,
-  visualType: VisualType,
   keywords: string[],
   random: () => number,
 ): string {
   const theme = titleCase(request.theme);
-  const format = visualTypeLabel(visualType).toLowerCase();
-  const options = [
-    `${theme} depends on ${keywords[0].toLowerCase()}, unfortunately`,
-    `${keywords[1]} became the surprise operating principle`,
-    `The ${format} confirms our ${keywords[2].toLowerCase()} problem`,
-    `${keywords[0]} and ${keywords[3]} are now in productive tension`,
-    `A bold new era of ${keywords[1].toLowerCase()} accountability begins`,
-    `${keywords[2]} was hiding inside the agenda the whole time`,
-  ];
+  const concepts = significantWords(request.theme);
+  const primary = concepts[index % concepts.length] || keywords[0];
+  const secondary = concepts[(index + 1) % concepts.length] || keywords[1];
+  const format = visualTypeLabel(spec.visualType).toLowerCase();
+  const simplePatterns: Record<SlideCompositionSpec["narrativeRole"], string[]> = {
+    opening: [`${primary} needs a map`, `${secondary} has a plan`],
+    context: [`${primary} explains the room`, `${secondary} sets the stage`],
+    evidence: [`${keywords[2]} has receipts`, `${primary} looks measurable`],
+    comparison: [`${primary} beats ${secondary}`, `${secondary} changes the math`],
+    friction: [`${secondary} creates drag`, `${primary} hits friction`],
+    crisis: [`${primary} enters crisis mode`, `${keywords[6]} raises the alarm`],
+    process: [`${primary} follows the arrows`, `${secondary} runs the loop`],
+    forecast: [`${secondary} is next`, `${primary} moves by Friday`],
+    recommendation: [`Choose the practical chaos`, `${keywords[2]} gets approved`],
+    closing: [`${primary} was the answer`, `${secondary} gets the roadmap`],
+  };
+
+  if (request.noWords) {
+    return clip(pick(simplePatterns[spec.narrativeRole], random), 56);
+  }
+
+  const rolePatterns: Record<SlideCompositionSpec["narrativeRole"], string[]> = {
+    opening: [`${theme} gets one surprisingly defensible thesis`, `${primary} becomes the official starting point`],
+    context: [`The room underestimated the ${secondary.toLowerCase()} layer`, `${primary} context gets stranger at slide speed`],
+    evidence: [`${keywords[2]} produces just enough evidence`, `The ${format} makes ${primary.toLowerCase()} look measurable`],
+    comparison: [`${primary} beats ${secondary.toLowerCase()} by committee logic`, `The tradeoff turns on ${keywords[4].toLowerCase()}`],
+    friction: [`${secondary} creates a very presentable problem`, `Nobody budgeted for the ${keywords[5].toLowerCase()} variable`],
+    crisis: [`${primary} enters the crisis quadrant with confidence`, `${keywords[6]} changed the risk profile overnight`],
+    process: [`The process now routes through ${secondary.toLowerCase()}`, `${primary} becomes a repeatable operating ritual`],
+    forecast: [`The forecast points directly at ${keywords[8].toLowerCase()}`, `${secondary} is scheduled to become next week's problem`],
+    recommendation: [`The recommendation is bold and mostly laminated`, `${keywords[2]} is the safest-looking next move`],
+    closing: [`The final answer was ${primary.toLowerCase()} all along`, `${secondary} leaves the room with a roadmap`],
+  };
+  const options = rolePatterns[spec.narrativeRole];
 
   if (request.insideJokes && index % 3 === 1) {
     return clip(`${titleCase(parseJokes(request)[0] || keywords[0])} has entered the ${format}`, 92);
@@ -494,29 +479,35 @@ function fallbackHeading(
 }
 
 function fallbackPoints(
-  index: number,
+  spec: SlideCompositionSpec,
   request: DeckRequest,
   keywords: string[],
   random: () => number,
 ): string[] {
   const eventWord = clip(request.eventContext, 42);
-  const options = [
-    [`${keywords[0]} is measurable if nobody asks follow-ups`, `${keywords[1]} unlocks the next suspicious metric`],
-    [`Designed for ${eventWord}`, `${keywords[2]} keeps the room aligned enough`],
-    [`Phase one: ${keywords[0].toLowerCase()}`, `Phase two: ${keywords[1].toLowerCase()}`, `Phase three: applause`],
-    [`The risk is ${keywords[2].toLowerCase()}`, `The upside is ${keywords[3].toLowerCase()}`],
-    [`Audience impact: ${request.audience}`, `${keywords[0]} remains the official explanation`],
-  ];
+  const options: Record<SlideCompositionSpec["narrativeRole"], string[][]> = {
+    opening: [[`${keywords[0]} frames the whole room`, `Designed for ${eventWord}`]],
+    context: [[`${keywords[1]} explains the setup`, `${keywords[2]} keeps the backstory moving`]],
+    evidence: [[`${keywords[0]} is measurable if nobody asks follow-ups`, `${keywords[3]} unlocks the next metric`]],
+    comparison: [[`${keywords[2]} wins on vibes`, `${keywords[4]} wins on paperwork`]],
+    friction: [[`The risk is ${keywords[5].toLowerCase()}`, `The upside is ${keywords[6].toLowerCase()}`]],
+    crisis: [[`${keywords[3]} now requires a mitigation slide`, `${keywords[7]} remains technically under control`]],
+    process: [[`First route through ${keywords[1].toLowerCase()}`, `Then let ${keywords[4].toLowerCase()} pretend it was planned`]],
+    forecast: [[`${keywords[0]} peaks before anyone is ready`, `${keywords[2]} becomes next week's agenda`]],
+    recommendation: [[`Approve the ${keywords[3].toLowerCase()} pilot`, `Name ${keywords[5].toLowerCase()} as the success metric`]],
+    closing: [[`Audience impact: ${request.audience}`, `${keywords[7]} remains the official explanation`]],
+  };
 
-  return pick(options, random).map((point) => clip(point, 88));
+  return pick(options[spec.narrativeRole], random).map((point) => clip(point, 88));
 }
 
 function fallbackVisual(
-  visualType: VisualType,
+  spec: SlideCompositionSpec,
   index: number,
   keywords: string[],
   random: () => number,
 ): string {
+  const visualType = spec.visualType;
   const noun = pick(visualNouns, random);
   const labels: Record<VisualType, string[]> = {
     venn: [`${keywords[0]} Overlap`, `${keywords[1]} Venn`],
@@ -536,89 +527,46 @@ function fallbackVisual(
     canvas: [`${keywords[0]} Canvas`, `${keywords[1]} Operating Model`],
     bento: [`${keywords[0]} Bento`, `${keywords[1]} Modular Grid`],
     isometric: [`${keywords[0]} Isometric ${noun}`, `${keywords[1]} Stack Diagram`],
+    swimlane: [`${keywords[0]} Swimlane`, `${keywords[1]} Handoff Map`],
+    sankey: [`${keywords[0]} Allocation Flow`, `${keywords[1]} Sankey`],
+    gauge_row: [`${keywords[0]} Gauge Row`, `${keywords[1]} Readiness Meters`],
+    stacked_bar: [`${keywords[0]} Stacked Bar`, `${keywords[1]} Share Breakdown`],
+    pie_callout: [`${keywords[0]} Pie Callout`, `${keywords[1]} Slice Report`],
+    scatter_plot: [`${keywords[0]} Scatter Plot`, `${keywords[1]} Outlier Map`],
+    waterfall: [`${keywords[0]} Waterfall`, `${keywords[1]} Delta Bridge`],
+    gantt: [`${keywords[0]} Gantt`, `${keywords[1]} Project Schedule`],
+    donut_progress: [`${keywords[0]} Donut Progress`, `${keywords[1]} Completion Rings`],
+    lollipop_chart: [`${keywords[0]} Lollipop Chart`, `${keywords[1]} Dot Ranking`],
+    slope_chart: [`${keywords[0]} Slope Chart`, `${keywords[1]} Change Lines`],
+    bubble_map: [`${keywords[0]} Bubble Map`, `${keywords[1]} Cluster Field`],
+    decision_tree: [`${keywords[0]} Decision Tree`, `${keywords[1]} Branch Logic`],
+    fishbone: [`${keywords[0]} Fishbone`, `${keywords[1]} Root Cause Map`],
+    swot_grid: [`${keywords[0]} SWOT Grid`, `${keywords[1]} Strategy Grid`],
+    journey_map: [`${keywords[0]} Journey Map`, `${keywords[1]} Experience Path`],
+    calendar_strip: [`${keywords[0]} Calendar Strip`, `${keywords[1]} Week View`],
+    ranking_ladder: [`${keywords[0]} Ranking Ladder`, `${keywords[1]} Priority Steps`],
+    traffic_light: [`${keywords[0]} Traffic Light`, `${keywords[1]} Status Signal`],
+    sticky_wall: [`${keywords[0]} Sticky Wall`, `${keywords[1]} Idea Board`],
   };
 
   return labels[visualType][index % labels[visualType].length];
 }
 
-function fallbackVisualData(
-  visualType: VisualType,
-  index: number,
+function fallbackSpeakerHidden(
+  spec: SlideCompositionSpec,
   request: DeckRequest,
   keywords: string[],
-  title: string,
   random: () => number,
-): VisualData {
-  const values = fallbackValues(random, 8);
-  const notes = [
-    request.tone === "academic" ? `${keywords[0]} peer-reviewed vibes` : `${keywords[0]} looks official`,
-    `${keywords[1]} remains unexplained`,
-  ].map((note) => clip(note, 48));
+): string {
+  const cues = [
+    `Ask the room which part of ${keywords[0]} deserves a budget.`,
+    `Pause after naming ${keywords[1]} like it was obvious all along.`,
+    `Invite one brave defense of ${keywords[2]} before moving on.`,
+    `Callback ${request.eventContext} if the slide needs a rescue line.`,
+    `Treat the ${visualTypeLabel(spec.visualType).toLowerCase()} as extremely official.`,
+  ];
 
-  switch (visualType) {
-    case "venn":
-      return { title, labels: labelsFor(keywords, ["Belief", "Process", "Snacks"], 3), values: values.slice(0, 3), notes };
-    case "comparison_table":
-      return { title, labels: labelsFor(keywords, ["Old plan", "New plan", "Proof", "Doubt"], 4), values: values.slice(0, 4), notes };
-    case "before_after":
-      return { title, labels: ["Before", "After", clip(keywords[0], 42)], values: values.slice(0, 2), notes };
-    case "quadrant":
-      return { title, labels: labelsFor(keywords, ["Urgent", "Useful", "Loud", "Weird"], 4), values: values.slice(0, 4), notes };
-    case "flowchart":
-      return { title, labels: labelsFor(keywords, ["Notice", "Debate", "Chart", "Applause"], 4), values: [], notes };
-    case "funnel":
-      return { title, labels: labelsFor(keywords, ["Awareness", "Suspicion", "Alignment", "Budget"], 4), values: values.slice(0, 4).sort((a, b) => b - a), notes };
-    case "cycle":
-      return { title, labels: labelsFor(keywords, ["Spot", "Explain", "Rename", "Repeat"], 4), values: [], notes };
-    case "timeline":
-      return { title, labels: labelsFor(keywords, ["Now", "Soon", "Later", "Legend"], 4), values: values.slice(0, 4).sort((a, b) => a - b), notes };
-    case "hierarchy":
-      return { title, labels: labelsFor(keywords, ["Sponsor", "Squad", "Pilot", "Committee"], 4), values: [], notes };
-    case "pyramid":
-      return { title, labels: labelsFor(keywords, ["Proof", "Process", "Belief", "Applause"], 4), values: values.slice(0, 4), notes };
-    case "network":
-      return { title, labels: labelsFor(keywords, ["Host", "Presenter", "Metric", "Room", "Outcome"], 5), values: [], notes };
-    case "dashboard":
-      return { title, labels: labelsFor(keywords, ["Confidence", "Momentum", "Drama", "Readiness"], 4), values: values.slice(0, 4), notes };
-    case "radar":
-      return { title, labels: labelsFor(keywords, ["Speed", "Logic", "Charm", "Risk", "Snack"], 5), values: values.slice(0, 5), notes };
-    case "heat_matrix":
-      return { title, labels: labelsFor(keywords, ["Low", "Medium", "High", "Heroic"], 4), values: values.slice(0, 8), notes };
-    case "canvas":
-      return { title, labels: labelsFor(keywords, ["Audience", "Promise", "Metric", "Risk", "Next move", "Proof"], 6), values: [], notes };
-    case "bento":
-      return { title, labels: labelsFor(keywords, ["Signal", "Story", "Proof", "Action", "Wildcard"], 5), values: values.slice(0, 5), notes };
-    case "isometric":
-      return { title, labels: labelsFor(keywords, ["Foundation", "Platform", "Spark", "Launch"], 4), values: values.slice(0, 4), notes };
-  }
-}
-
-function buildKeywordBank(request: DeckRequest): string[] {
-  const raw = [
-    request.theme,
-    request.themeDescription,
-    request.eventContext,
-    request.audience,
-    request.insideJokes,
-  ].join(" ");
-  const words = raw
-    .split(/[^a-zA-Z0-9]+/)
-    .map((word) => word.trim().toLowerCase())
-    .filter((word) => word.length > 2 && !fillerWords.has(word));
-  const unique = Array.from(new Set(words)).map(titleCase);
-  const fallback = ["Signal", "Momentum", "Evidence", "Budget", "Timing", "Applause", "Risk", "Outcome"];
-
-  return [...unique, ...fallback].slice(0, 12);
-}
-
-function labelsFor(keywords: string[], fallbacks: string[], count: number): string[] {
-  return Array.from({ length: count }, (_, index) =>
-    clip(index < keywords.length ? keywords[index] : fallbacks[index % fallbacks.length], 42),
-  );
-}
-
-function fallbackValues(random: () => number, count: number): number[] {
-  return Array.from({ length: count }, () => 18 + Math.floor(random() * 78));
+  return clip(pick(cues, random), 220);
 }
 
 function visualTypeLabel(visualType: VisualType): string {
@@ -628,64 +576,75 @@ function visualTypeLabel(visualType: VisualType): string {
     .join(" ");
 }
 
-function rotate<T>(items: T[], offset: number): T[] {
-  return items.map((_, index) => items[(index + offset) % items.length]);
-}
-
-function shuffle<T>(items: T[], random: () => number): T[] {
-  const copy = [...items];
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
-  }
-  return copy;
-}
-
-function pick<T>(items: readonly T[], random: () => number): T {
-  return items[Math.floor(random() * items.length)];
-}
-
 function uniqueText(value: string, used: Set<string>, index: number, length: number): string {
   let candidate = clip(value, length);
   if (used.has(candidate)) {
-    candidate = clip(`${candidate} ${index + 1}`, length);
+    const suffixes = [
+      "under pressure",
+      "in the wild",
+      "with receipts",
+      "for the next phase",
+      "against all forecasts",
+    ];
+    candidate = clip(`${candidate}, ${suffixes[index % suffixes.length]}`, length);
   }
   used.add(candidate);
   return candidate;
 }
 
-function seededRandom(seed: string): () => number {
-  let state = 2166136261;
-  for (let index = 0; index < seed.length; index += 1) {
-    state ^= seed.charCodeAt(index);
-    state = Math.imul(state, 16777619);
+function repairDeckWithFallback(
+  deck: GeneratedDeckShape,
+  request: DeckRequest,
+  compositionPlan: SlideCompositionSpec[],
+  seed: string,
+): GeneratedDeckShape {
+  const issues = evaluateDeckQuality(deck, request, compositionPlan);
+
+  if (issues.length === 0) {
+    return deck;
   }
 
-  return () => {
-    state += 0x6d2b79f5;
-    let value = state;
-    value = Math.imul(value ^ (value >>> 15), value | 1);
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  const fallback = createFallbackDeckWithoutRepair(request, seed, compositionPlan);
+  const issueIndexes = new Set(issues.map((issue) => issue.slideIndex));
+
+  return {
+    ...deck,
+    slides: deck.slides.map((slide, index) =>
+      issueIndexes.has(index) ? { ...fallback.slides[index], id: slide.id } : slide,
+    ),
   };
 }
 
-function parseJokes(request: DeckRequest): string[] {
-  return request.insideJokes
-    .split(/[,.\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
+function createFallbackDeckWithoutRepair(
+  request: DeckRequest,
+  seed: string,
+  compositionPlan: SlideCompositionSpec[],
+): GeneratedDeckShape {
+  const random = seededRandom(seed);
+  const keywords = buildKeywordBank(request);
+  const paletteOrder = shuffle([...fallbackPalettes], random);
+  const usedHeadings = new Set<string>();
+  const usedVisualLabels = new Set<string>();
+  const titleStyle = pick(["Briefing", "Field Report", "Operating Model", "Forecast"], random);
+  const title = `${titleCase(request.theme)}: A Totally Prepared ${titleStyle}`;
+  const slides = compositionPlan.map((spec, index) => {
+    const slideKeywords = rotate(keywords, index);
+    const visualLabel = uniqueText(fallbackVisual(spec, index, slideKeywords, random), usedVisualLabels, index, 64);
+    return {
+      id: `fallback-${index + 1}`,
+      kind: spec.kind,
+      kicker: fallbackKicker(spec, index, slideKeywords, random),
+      heading: uniqueText(fallbackHeading(spec, index, request, slideKeywords, random), usedHeadings, index, 92),
+      points: fallbackPoints(spec, request, slideKeywords, random),
+      visualLabel,
+      visualType: spec.visualType,
+      visualVariant: spec.visualVariant,
+      visualData: buildFallbackVisualData(spec, request, slideKeywords, visualLabel, random),
+      visualPrompt: `${visualLabel} about ${request.theme} using ${slideKeywords.slice(0, 3).join(", ")}`,
+      speakerHidden: fallbackSpeakerHidden(spec, request, slideKeywords, random),
+      palette: paletteOrder[index % paletteOrder.length],
+    } satisfies KaraokeSlide;
+  });
 
-function clip(value: string, length: number): string {
-  return value.length > length ? `${value.slice(0, Math.max(0, length - 3))}...` : value;
-}
-
-function titleCase(value: string): string {
-  return value
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
+  return { title, slides };
 }

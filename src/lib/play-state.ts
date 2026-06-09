@@ -5,7 +5,7 @@ type PlayStateStore = Record<string, SlideSyncState>;
 const memoryStore: PlayStateStore = {};
 const defaultState: SlideSyncState = {
   index: -1,
-  secondsLeft: 240,
+  secondsLeft: 120,
   isRunning: false,
 };
 
